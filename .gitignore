@@ -1,0 +1,54 @@
+# Python bytecode and test/tool caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local Python environments
+.venv/
+venv/
+env/
+CNN_environment.venv/
+
+# Local editor and agent state
+.vscode/
+.idea/
+.agents/
+.codex/
+*.swp
+*~
+
+# Trained models and machine-learning datasets
+models/
+datasets/
+classifier_dataset_presence/
+Matenadata/
+*.keras
+*.h5
+*.hdf5
+*.joblib
+*.pkl
+*.pickle
+*.jsonl
+
+# Source documents and generated pipeline artifacts
+handwritten_text/
+temp_processing/
+final_results/
+failed_results/
+reports/
+scan_report/
+test_color_masks/
+
+# Logs, archives, and operating-system files
+*.log
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+.DS_Store
+Thumbs.db

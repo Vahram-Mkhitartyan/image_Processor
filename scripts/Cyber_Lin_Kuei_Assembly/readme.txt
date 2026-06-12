@@ -1,0 +1,121 @@
+Cyber Lin Kuei Assembly
+=======================
+
+Purpose
+-------
+Training, evaluation, and preserved ML experiments live here. Runtime node code
+does not belong in this folder.
+
+Files
+-----
+train_minos_classifier.py:
+    Trains Minos on the four visual classes.
+
+evaluate_minos_v2.py:
+    Evaluates saved Minos models and threshold behavior.
+
+glyph_classifier.py:
+    Glyph-model training/experiment code for the future N05 expert family.
+
+evaluate_glyph_classifier.py:
+    Evaluates saved glyph classifier behavior.
+
+scribetrace_random_forest.py:
+    Exports deterministic ScribeTrace geometry vectors from Matenadata and
+    trains a Random Forest glyph-classification baseline.
+
+scribetrace_random_forest_settings.json:
+    Owns dataset/module routing, ScribeTrace extraction controls, split ratios,
+    output folders, and Random Forest hyperparameters.
+
+scribemap_v1_classifier_test.py:
+    Preserved old ScribeMap/classifier experiment. It is not part of the active
+    runtime pipeline.
+
+Minos Classes
+-------------
+
+    mixed
+    handwriting_only
+    printed_only
+    empty_or_noise
+
+Runtime Status
+--------------
+Minos is active in N03 through:
+
+    models/minos_v2_0_best.keras
+
+N03 converts the three sigmoid outputs printed_present, handwriting_present, and
+noise into the four route classes plus review.
+
+Dataset
+-------
+The Minos dataset lives under classifier_dataset_presence/ and is preserved by
+main.py clean. Models live under models/ and are also preserved.
+
+Command
+-------
+
+    .venv/bin/python scripts/main.py train
+
+Run the ScribeTrace Random Forest smoke export:
+
+    .venv/bin/python \
+        scripts/Cyber_Lin_Kuei_Assembly/scribetrace_random_forest.py \
+        --mode export --limit-per-class 1
+
+Run the configured export and training baseline:
+
+    .venv/bin/python \
+        scripts/Cyber_Lin_Kuei_Assembly/scribetrace_random_forest.py \
+        --mode export-train
+
+Train an already exported full JSONL dataset:
+
+    .venv/bin/python -u \
+        scripts/Cyber_Lin_Kuei_Assembly/scribetrace_random_forest.py \
+        --mode train \
+        --dataset-jsonl datasets/scribetrace_random_forest_v0_2/scribetrace_rf_full.jsonl \
+        2>&1 | tee reports/scribetrace_random_forest_v0_2/full_train_from_export.log
+
+The trainer reads JSONL into a compact float32 feature matrix and splits sample
+indexes rather than retaining duplicate Python dictionaries. The configured
+forest also caps depth, leaves per tree, and worker count so full training fits
+an 8 GB machine. The leaf cap is especially important for 78-class trees,
+because every tree node stores one probability value per class.
+
+ScribeTrace Random Forest v0.2
+------------------------------
+v0.2 uses the 61-feature ScribeTrace vector, including visible ink holes,
+direction changes, turn orientation, movement ratios, displacement,
+straightness, and direction entropy.
+
+The 7,800-sample subset produced:
+
+    test top-1: 0.6077
+    test top-5: 0.8436
+
+The complete 70,060-sample export produced:
+
+    validation top-1: 0.5784
+    validation top-5: 0.8304
+    test top-1: 0.5674
+    test top-5: 0.8279
+
+The full result is the authoritative benchmark. The smaller export uses the
+first limited set of sorted images per class and is therefore not a random,
+representative subset of the full class distribution. Its higher score should
+not be interpreted as evidence that additional data reduces model quality.
+
+Artifacts:
+
+    models/scribetrace_random_forest_v0_2/
+    reports/scribetrace_random_forest_v0_2/
+    datasets/scribetrace_random_forest_v0_2/
+
+Any ScribeTrace feature change requires a fresh JSONL export and retraining.
+Inference should compare exact ordered feature_names against the model schema
+before calling predict_proba().
+
+The folder name is ridiculous in the correct way. Keep it.

@@ -1,0 +1,17 @@
+{
+  "reset_output": true,
+  "experts": {
+    "tesseract_ocr": {
+      "enabled": false
+    },
+    "scribetrace": {
+      "enabled": false
+    },
+    "character_detector": {
+      "enabled": false
+    },
+    "word_level_ocr": {
+      "enabled": false
+    }
+  }
+}

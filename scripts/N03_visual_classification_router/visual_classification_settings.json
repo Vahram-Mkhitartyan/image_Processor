@@ -1,0 +1,10 @@
+{
+    "thresholds": {
+        "printed_threshold": 0.45,
+        "handwriting_threshold": 0.45,
+        "noise_threshold": 0.65,
+        "mixed_handwriting_safety_threshold": 0.25
+    },
+    "include_rejected": false,
+    "reset_output": true
+}
