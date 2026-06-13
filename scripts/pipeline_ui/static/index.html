@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Armenian OCR Control Room</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="paper-grain"></div>
+  <header class="masthead">
+    <div class="brand-lockup">
+      <div class="brand-mark" aria-hidden="true">
+        <span class="brand-line"></span>
+        <span>ST</span>
+      </div>
+      <div>
+        <p class="eyebrow">ARMENIAN DOCUMENT INTELLIGENCE</p>
+        <h1>Pipeline Control Room</h1>
+      </div>
+    </div>
+    <div class="masthead-status">
+      <span id="heartbeat" class="heartbeat"></span>
+      <div>
+        <strong id="system-state">SYSTEM READY</strong>
+        <small id="updated-at">Waiting for telemetry</small>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <aside class="left-rail">
+      <section class="rail-section">
+        <div class="section-heading">
+          <span>Documents</span>
+          <span id="document-count" class="count-pill">0</span>
+        </div>
+        <div id="document-list" class="document-list"></div>
+      </section>
+
+      <section class="rail-section utility-section">
+        <div class="section-heading">
+          <span>Utilities</span>
+        </div>
+        <div class="utility-grid">
+          <button class="utility-button" data-command="doctor">Doctor</button>
+          <button class="utility-button" data-command="status">Status</button>
+          <button class="utility-button" data-command="lines">Sacred lines</button>
+          <button class="utility-button danger" data-command="clean">Clean outputs</button>
+        </div>
+      </section>
+
+      <section class="project-card">
+        <p class="eyebrow">PROJECT ROOT</p>
+        <p id="project-root" class="project-path">...</p>
+        <div class="project-stat">
+          <span>Active command</span>
+          <strong id="active-command">none</strong>
+        </div>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <section class="phase-panel">
+        <div class="panel-title-row">
+          <div>
+            <p class="eyebrow">EXECUTION RAIL</p>
+            <h2>Move the document through the system</h2>
+          </div>
+          <div class="run-actions">
+            <button id="stop-button" class="stop-button" disabled>Stop</button>
+            <button class="pipeline-button" data-command="pipeline">
+              <span>Run full pipeline</span>
+              <span class="button-arrow">↗</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="phase-rail">
+          <button class="phase-card" data-command="prep" data-stage="n00">
+            <span class="phase-number">N00</span>
+            <strong>Prepare</strong>
+            <small>Color layers, masks, geometry</small>
+          </button>
+          <span class="phase-connector"></span>
+          <button class="phase-card" data-command="scribemap" data-stage="n01">
+            <span class="phase-number">N01</span>
+            <strong>ScribeMap</strong>
+            <small>Regions and spatial groups</small>
+          </button>
+          <span class="phase-connector"></span>
+          <button class="phase-card" data-command="refine" data-stage="n02">
+            <span class="phase-number">N02</span>
+            <strong>Refine</strong>
+            <small>Layer-aware crop preparation</small>
+          </button>
+          <span class="phase-connector"></span>
+          <button class="phase-card" data-command="visual" data-stage="n03">
+            <span class="phase-number">N03</span>
+            <strong>Route</strong>
+            <small>Minos visual classification</small>
+          </button>
+          <span class="phase-connector"></span>
+          <button class="phase-card" data-command="printed_ocr" data-stage="n04">
+            <span class="phase-number">N04</span>
+            <strong>Printed</strong>
+            <small>Printed OCR evidence</small>
+          </button>
+          <span class="phase-connector"></span>
+          <button class="phase-card" data-command="handwritten_ocr" data-stage="n05">
+            <span class="phase-number">N05</span>
+            <strong>Experts</strong>
+            <small>Handwriting expert map</small>
+          </button>
+        </div>
+      </section>
+
+      <section class="trace-panel">
+        <div class="trace-toolbar">
+          <div>
+            <p class="eyebrow">ARTIFACT TRACE</p>
+            <h2 id="trace-title">Select a document</h2>
+          </div>
+          <div class="trace-controls">
+            <label class="search-field">
+              <span>⌕</span>
+              <input id="artifact-search" type="search" placeholder="Filter artifacts">
+            </label>
+            <button id="refresh-artifacts" class="icon-button" title="Refresh artifacts">↻</button>
+          </div>
+        </div>
+
+        <div id="stage-tabs" class="stage-tabs">
+          <button class="stage-tab active" data-stage="all">ALL</button>
+          <button class="stage-tab" data-stage="input">SOURCE</button>
+          <button class="stage-tab" data-stage="n00">N00</button>
+          <button class="stage-tab" data-stage="n01">N01</button>
+          <button class="stage-tab" data-stage="n02">N02</button>
+          <button class="stage-tab" data-stage="n03">N03</button>
+          <button class="stage-tab" data-stage="n04">N04</button>
+          <button class="stage-tab" data-stage="n05">N05</button>
+        </div>
+
+        <div class="trace-layout">
+          <div class="preview-stage">
+            <div id="preview-empty" class="preview-empty">
+              <div class="empty-glyph">⌁</div>
+              <strong>No artifact selected</strong>
+              <span>Choose an image from the contact sheet.</span>
+            </div>
+            <img id="artifact-preview" alt="Selected pipeline artifact">
+            <div id="preview-caption" class="preview-caption">
+              <div>
+                <span id="preview-kind" class="artifact-kind">artifact</span>
+                <strong id="preview-name">No selection</strong>
+              </div>
+              <code id="preview-path">—</code>
+            </div>
+          </div>
+
+          <div class="contact-sheet-wrap">
+            <div class="contact-sheet-heading">
+              <span id="artifact-summary">0 artifacts</span>
+              <span id="artifact-warning"></span>
+            </div>
+            <div id="contact-sheet" class="contact-sheet"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="console-panel">
+        <div class="console-header">
+          <div>
+            <span class="console-dot red"></span>
+            <span class="console-dot amber"></span>
+            <span class="console-dot green"></span>
+            <strong>MAIN.PY // LIVE OUTPUT</strong>
+          </div>
+          <button id="clear-console" class="console-action">Clear view</button>
+        </div>
+        <pre id="console-output"><span class="console-muted">Control room online. Choose a phase when ready.</span></pre>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

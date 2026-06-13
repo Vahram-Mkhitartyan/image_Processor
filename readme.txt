@@ -34,6 +34,7 @@ Run commands from the project root:
 
     .venv/bin/python main.py status
     .venv/bin/python main.py pipeline
+    .venv/bin/python main.py ui
 
 The root launcher forwards to the full controller in scripts/main.py. Direct
 controller commands remain available:
@@ -52,6 +53,17 @@ controller commands remain available:
     .venv/bin/python scripts/main.py pipeline
     .venv/bin/python scripts/main.py clean
     .venv/bin/python scripts/main.py train
+
+Pipeline Control Room
+---------------------
+Launch the local browser interface:
+
+    .venv/bin/python main.py ui
+
+The control room runs on 127.0.0.1 and opens in the default browser. It keeps
+the existing CLI as the execution engine while adding phase controls, live
+terminal output, per-document progress, and an image artifact trace from the
+source document through N00-N05.
 
 Shell Completion
 ----------------
@@ -106,6 +118,12 @@ clean:
 doctor:
     Runs read-only checks for project structure, Python dependencies, syntax,
     JSON validity, phase contracts, crop references, and stale output paths.
+
+status:
+    Prints a whole-system operational snapshot: node availability, document
+    progress across N00-N05, expert enablement, runtime assets, storage, Python,
+    Git state, and overall readiness. Minos training counts remain under the
+    separate counts command.
 
 Project Folders
 ---------------

@@ -76,6 +76,7 @@ DOCTOR_RETIRED_ARTIFACT_NAMES = {
 }
 
 MAIN_COMMANDS = (
+    "ui",
     "status",
     "counts",
     "lines",
@@ -99,6 +100,27 @@ MAIN_COMMANDS = (
     "setup",
     "completion",
 )
+
+
+def run_pipeline_ui():
+    """Launch the local browser control room for pipeline commands.
+
+    Args:
+        None.
+
+    Returns:
+        None. The server runs until interrupted with Ctrl+C.
+    """
+    if SCRIPTS_DIR not in sys.path:
+        sys.path.insert(0, SCRIPTS_DIR)
+
+    from pipeline_ui import launch_pipeline_ui
+
+    launch_pipeline_ui(
+        base_dir=BASE_DIR,
+        controller_script=os.path.abspath(__file__),
+        python_executable=sys.executable,
+    )
 
 
 def add_doctor_result(results, level, check_name, detail=None):
@@ -871,71 +893,363 @@ def show_dataset_counts():
     print("Total:", total)
 
 
+def format_storage_size(byte_count):
+    """Format a byte count using compact binary units."""
+    value = float(max(0, byte_count))
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+
+    for unit in units:
+        if value < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024.0
+
+    return f"{int(byte_count)} B"
+
+
+def get_directory_size(directory_path):
+    """Return directory size using du when available, with a safe fallback."""
+    if not os.path.exists(directory_path):
+        return 0
+
+    size_result = subprocess.run(
+        ["du", "-s", "-B1", directory_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if size_result.returncode == 0:
+        try:
+            return int(size_result.stdout.split()[0])
+        except (IndexError, ValueError):
+            pass
+
+    total_size = 0
+    for root, _, files in os.walk(directory_path):
+        for file_name in files:
+            file_path = os.path.join(root, file_name)
+            try:
+                total_size += os.path.getsize(file_path)
+            except OSError:
+                continue
+    return total_size
+
+
+def get_document_phase_state(document_id):
+    """Return generated phase flags for one input document."""
+    document_dir = os.path.join(TEMP_PROCESSING_DIR, document_id)
+    phase_paths = {
+        "N00": os.path.join(
+            document_dir,
+            "n00_file_preparation",
+            "metadata",
+            "metadata.json",
+        ),
+        "N01": os.path.join(
+            document_dir,
+            "n01_scribemap",
+            "metadata",
+            f"{document_id}_classified_groups.json",
+        ),
+        "N02": os.path.join(
+            document_dir,
+            "n02_crop_refiner",
+            "metadata",
+            f"{document_id}_refined_groups.json",
+        ),
+        "N03": os.path.join(
+            document_dir,
+            "n03_visual_classification",
+            "metadata",
+            f"{document_id}_n03_visual_classification_routes.json",
+        ),
+        "N04": os.path.join(
+            document_dir,
+            "n04_printed_ocr",
+            "metadata",
+            f"{document_id}_printed_text_map.json",
+        ),
+        "N05": os.path.join(
+            document_dir,
+            "n05_handwritten_ocr",
+            "metadata",
+            f"{document_id}_handwritten_text_map.json",
+        ),
+    }
+    phase_state = {
+        phase_name: os.path.isfile(phase_path)
+        for phase_name, phase_path in phase_paths.items()
+    }
+    phase_state["RESULT"] = os.path.isfile(
+        os.path.join(
+            FINAL_RESULTS_DIR,
+            f"{document_id}_handwriting_result.json",
+        )
+    )
+    return phase_state
+
+
+def get_n05_expert_state():
+    """Return enabled flags from the N05 expert settings file."""
+    settings_path = os.path.join(N05_DIR, "settings.json")
+    expert_names = (
+        "tesseract_ocr",
+        "scribetrace",
+        "character_detector",
+        "word_level_ocr",
+    )
+    state = {expert_name: False for expert_name in expert_names}
+
+    try:
+        with open(settings_path, "r", encoding="utf-8") as file:
+            settings = json.load(file)
+        configured_experts = settings.get("experts", {})
+        for expert_name in expert_names:
+            state[expert_name] = bool(
+                configured_experts.get(expert_name, {}).get("enabled", False)
+            )
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return state
+
+
+def get_git_status_summary():
+    """Return the current branch, commit, and working-tree state."""
+    repository_result = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=BASE_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if repository_result.returncode != 0:
+        return {"available": False}
+
+    branch_result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=BASE_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    commit_result = subprocess.run(
+        ["git", "log", "-1", "--format=%h %s"],
+        cwd=BASE_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    status_result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=BASE_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    changed_paths = [
+        line
+        for line in status_result.stdout.splitlines()
+        if line.strip()
+    ]
+    return {
+        "available": True,
+        "branch": branch_result.stdout.strip() or "detached",
+        "commit": commit_result.stdout.strip() or "no commits",
+        "changed_path_count": len(changed_paths),
+    }
+
+
 def show_project_status():
-    """Print a high-level project status summary.
-    
+    """Print a read-only operational snapshot of the complete OCR system.
+
     Args:
         None.
-    
+
     Returns:
         None.
     """
-    print("OCR Project Status")
-    print("-------------------------")
+    node_scripts = (
+        ("N00", "File preparation", FILE_PREPARATION_SCRIPT),
+        ("N01", "ScribeMap", SCRIBEMAP_SCRIPT),
+        ("N02", "Crop refiner", CROP_REFINER_SCRIPT),
+        ("N03", "Visual router", VISUAL_CLASSIFICATION_SCRIPT),
+        ("N04", "Printed OCR", PRINTED_OCR_SCRIPT),
+        ("N05", "Handwriting experts", N05_ORCHESTRATOR_SCRIPT),
+    )
+    missing_nodes = [
+        node_name
+        for node_name, _, script_path in node_scripts
+        if not os.path.isfile(script_path)
+    ]
+    document_ids = get_input_document_ids()
+    document_states = {
+        document_id: get_document_phase_state(document_id)
+        for document_id in document_ids
+    }
+    active_minos_model = os.path.join(MODELS_DIR, "minos_v2_0_best.keras")
+    expert_state = get_n05_expert_state()
+    git_state = get_git_status_summary()
 
-    print("Base dir:", BASE_DIR)
-    print("Scripts dir:", SCRIPTS_DIR)
-    print("File preparation node dir:", FILE_PREPARATION_DIR)
-    print("ScribeMap node dir:", SCRIBEMAP_DIR)
-    print("Crop refiner node dir:", CROP_REFINER_DIR)
-    print("Dataset dir:", DATASET_DIR)
-    print("Input documents dir:", INPUT_DOCUMENTS_DIR)
-    print("Models dir:", MODELS_DIR)
-    print("Final results dir:", FINAL_RESULTS_DIR)
-    print("Failed results dir:", FAILED_RESULTS_DIR)
-    print("Temp processing dir:", TEMP_PROCESSING_DIR)
-    print("Visual classification node dir:", VISUAL_CLASSIFICATION_DIR)
-    print("Printed OCR node dir:", PRINTED_OCR_DIR)
-    print("N05 expert node dir:", N05_DIR)
-
-    print("-------------------------")
-    show_dataset_counts()
-
-    print("-------------------------")
-    print("Node scripts:")
-    print("file_preparation.py:", "ok" if os.path.exists(FILE_PREPARATION_SCRIPT) else "missing")
-    print("scribemap_detector.py:", "ok" if os.path.exists(SCRIBEMAP_SCRIPT) else "missing")
-    print("crop_refiner.py:", "ok" if os.path.exists(CROP_REFINER_SCRIPT) else "missing")
-    print("visual classifier.py:", "ok" if os.path.exists(VISUAL_CLASSIFICATION_SCRIPT) else "missing")
-    print("printed_ocr.py:", "ok" if os.path.exists(PRINTED_OCR_SCRIPT) else "missing")
-    print(
-        "N05 expert_orchestrator.py:",
-        "ok" if os.path.exists(N05_ORCHESTRATOR_SCRIPT) else "missing"
+    structural_ready = (
+        not missing_nodes
+        and os.path.isfile(BATCH_SCRIPT)
+        and os.path.isfile(active_minos_model)
+        and os.path.isdir(INPUT_DOCUMENTS_DIR)
+    )
+    all_outputs_complete = bool(document_states) and all(
+        all(
+            phase_state[phase_name]
+            for phase_name in ("N00", "N01", "N02", "N03", "N04", "N05")
+        )
+        for phase_state in document_states.values()
     )
 
-    print("-------------------------")
-    print("Models:")
-
-    if os.path.exists(MODELS_DIR):
-        for file_name in sorted(os.listdir(MODELS_DIR)):
-            if file_name.endswith(".keras"):
-                print("-", file_name)
+    if structural_ready and document_ids and all_outputs_complete:
+        overall_status = "READY"
+        overall_detail = "Core pipeline and current document outputs are complete."
+    elif structural_ready and document_ids:
+        overall_status = "READY"
+        overall_detail = (
+            "Core pipeline is operational; current document outputs are partial."
+        )
+    elif structural_ready:
+        overall_status = "IDLE"
+        overall_detail = "Core pipeline is ready; no input documents found."
     else:
-        print("models folder missing")
+        overall_status = "ATTENTION"
+        overall_detail = "One or more required runtime components are missing."
 
+    print("Image Processor System Status")
     print("-------------------------")
-    print("Input documents:")
+    print("Overall:", overall_status)
+    print("Detail:", overall_detail)
+    print("Python:", sys.executable)
+    print(
+        "Version:",
+        f"{sys.version_info.major}.{sys.version_info.minor}."
+        f"{sys.version_info.micro}",
+    )
+    print("Project:", BASE_DIR)
 
-    if os.path.exists(INPUT_DOCUMENTS_DIR):
-        input_files = [
-            file_name
-            for file_name in os.listdir(INPUT_DOCUMENTS_DIR)
-            if os.path.isfile(f"{INPUT_DOCUMENTS_DIR}/{file_name}")
-        ]
+    print()
+    print("Pipeline structure")
+    print("-------------------------")
+    for node_name, node_title, script_path in node_scripts:
+        marker = "OK" if os.path.isfile(script_path) else "MISSING"
+        print(f"[{marker:7}] {node_name}  {node_title}")
+    batch_marker = "OK" if os.path.isfile(BATCH_SCRIPT) else "MISSING"
+    print(f"[{batch_marker:7}] LPH  Batch orchestration")
 
-        print("Count:", len(input_files))
+    print()
+    print("Document progress")
+    print("-------------------------")
+    if not document_ids:
+        print("No supported documents in handwritten_text.")
     else:
-        print("handwritten_text folder missing")
+        header = (
+            f"{'DOCUMENT':<18} "
+            + " ".join(f"{name:>6}" for name in (
+                "N00",
+                "N01",
+                "N02",
+                "N03",
+                "N04",
+                "N05",
+                "RESULT",
+            ))
+        )
+        print(header)
+        print("-" * len(header))
+        for document_id in document_ids:
+            phase_state = document_states[document_id]
+            markers = " ".join(
+                f"{'yes' if phase_state[name] else '-':>6}"
+                for name in ("N00", "N01", "N02", "N03", "N04", "N05", "RESULT")
+            )
+            print(f"{document_id:<18} {markers}")
+
+    phase_totals = {
+        phase_name: sum(
+            state[phase_name]
+            for state in document_states.values()
+        )
+        for phase_name in ("N00", "N01", "N02", "N03", "N04", "N05", "RESULT")
+    }
+    if document_ids:
+        print()
+        print(
+            "Coverage:",
+            ", ".join(
+                f"{phase_name} {count}/{len(document_ids)}"
+                for phase_name, count in phase_totals.items()
+            ),
+        )
+
+    model_extensions = {".keras", ".joblib", ".pt", ".pth", ".onnx"}
+    model_files = []
+    if os.path.isdir(MODELS_DIR):
+        for root, _, files in os.walk(MODELS_DIR):
+            for file_name in files:
+                if os.path.splitext(file_name)[1].lower() in model_extensions:
+                    model_files.append(os.path.join(root, file_name))
+
+    print()
+    print("Runtime assets")
+    print("-------------------------")
+    print("Input documents:", len(document_ids))
+    print("Model artifacts:", len(model_files))
+    print(
+        "Active Minos:",
+        "available" if os.path.isfile(active_minos_model) else "missing",
+    )
+    print(
+        "N05 experts enabled:",
+        f"{sum(expert_state.values())}/{len(expert_state)}",
+    )
+    for expert_name, enabled in expert_state.items():
+        print(f"  {'ON ' if enabled else 'off'}  {expert_name}")
+
+    print()
+    print("Storage")
+    print("-------------------------")
+    for label, path in (
+        ("Models", MODELS_DIR),
+        ("Datasets", os.path.join(BASE_DIR, "datasets")),
+        ("Temp processing", TEMP_PROCESSING_DIR),
+        ("Final results", FINAL_RESULTS_DIR),
+        ("Failed results", FAILED_RESULTS_DIR),
+    ):
+        print(f"{label:<18} {format_storage_size(get_directory_size(path)):>10}")
+
+    disk_usage = shutil.disk_usage(BASE_DIR)
+    print(
+        f"{'Disk free':<18} "
+        f"{format_storage_size(disk_usage.free):>10} "
+        f"of {format_storage_size(disk_usage.total)}"
+    )
+
+    print()
+    print("Repository")
+    print("-------------------------")
+    if not git_state["available"]:
+        print("Git: not initialized")
+    else:
+        print("Branch:", git_state["branch"])
+        print("Latest:", git_state["commit"])
+        changed_count = git_state["changed_path_count"]
+        print(
+            "Working tree:",
+            "clean" if changed_count == 0 else f"{changed_count} changed paths",
+        )
+
+    print()
+    print("Quick actions")
+    print("-------------------------")
+    print("Health check:  python main.py doctor")
+    print("Control room:  python main.py ui")
+    print("Full pipeline: python main.py pipeline")
 
 
 def train_model():
@@ -1236,7 +1550,10 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "status":
+    if args.command == "ui":
+        run_pipeline_ui()
+
+    elif args.command == "status":
         show_project_status()
 
     elif args.command == "counts":
