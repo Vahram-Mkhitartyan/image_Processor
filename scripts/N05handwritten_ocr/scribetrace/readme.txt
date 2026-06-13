@@ -81,6 +81,11 @@ in focused modules:
         Zhang-Suen thinning, skeleton point extraction, graph construction,
         crossing-number topology, and logical junction clusters.
 
+    trace_segmentation.py
+        Character-boundary proposals combining projection valleys, connected
+        component attachment, exact TracePath edge lookup, virtual graph cuts,
+        and coherent left/right vector-subgraph validation.
+
     trace_paths.py
         Complete edge traversal, deterministic loops, terminal-spur merging,
         coordinate signals, and landmark extraction.

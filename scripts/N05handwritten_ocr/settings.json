@@ -1,6 +1,31 @@
 {
   "reset_output": true,
   "copy_selected_crops": false,
+  "character_unit_proposer": {
+    "crop_padding_px": 2,
+    "split_overlap_px": 1,
+    "save_debug": true,
+    "segmentation": {
+      "enabled": true,
+      "maximum_hypotheses": 5,
+      "minimum_unit_width_px": 24,
+      "minimum_unit_aspect_ratio": 1.6,
+      "minimum_segment_width_ratio": 0.15,
+      "minimum_segment_ink_ratio": 0.12,
+      "maximum_projection_ratio": 0.4,
+      "maximum_skeleton_crossings": 2,
+      "cut_search_radius_px": 2,
+      "minimum_cut_spacing_ratio": 0.08,
+      "floating_component_max_area_ratio": 0.18,
+      "floating_component_max_height_ratio": 0.45,
+      "floating_attachment_max_horizontal_gap_px": 12,
+      "minimum_component_ink_pixels": 2,
+      "minimum_vector_subgraph_points": 2,
+      "minimum_vector_subgraph_ratio": 0.15,
+      "minimum_side_dominance": 0.75,
+      "minimum_junction_distance_px": 2
+    }
+  },
   "experts": {
     "tesseract_ocr": {
       "enabled": false

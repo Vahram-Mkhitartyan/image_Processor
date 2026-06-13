@@ -96,17 +96,20 @@ MAIN_COMMANDS = (
     "handwritten_ocr",
     "handwritten",
     "n05",
+    "splits",
+    "letter_splits",
     "clean",
     "setup",
     "completion",
 )
 
 
-def run_pipeline_ui():
+def run_pipeline_ui(initial_stage=None, initial_query=None):
     """Launch the local browser control room for pipeline commands.
 
     Args:
-        None.
+        initial_stage: Optional artifact stage selected when the UI opens.
+        initial_query: Optional artifact-path filter selected when the UI opens.
 
     Returns:
         None. The server runs until interrupted with Ctrl+C.
@@ -120,6 +123,8 @@ def run_pipeline_ui():
         base_dir=BASE_DIR,
         controller_script=os.path.abspath(__file__),
         python_executable=sys.executable,
+        initial_stage=initial_stage,
+        initial_query=initial_query,
     )
 
 
@@ -1389,6 +1394,22 @@ def run_n05_expert_node():
     run_python_script_with_args(BATCH_SCRIPT, ["--phase", "handwritten_ocr"])
 
 
+def run_character_split_viewer():
+    """Regenerate N05 character hypotheses and open their debug gallery.
+
+    Args:
+        None.
+
+    Returns:
+        None. The control-room server runs until interrupted with Ctrl+C.
+    """
+    run_n05_expert_node()
+    run_pipeline_ui(
+        initial_stage="n05",
+        initial_query="character_unit_proposer/debug",
+    )
+
+
 def clean_outputs():
     # Keep these core folders untouched, per user request and project safety.
     """Remove generated output folders while preserving source assets.
@@ -1592,6 +1613,9 @@ def main():
 
     elif args.command in ["handwritten_ocr", "handwritten", "n05"]:
         run_n05_expert_node()
+
+    elif args.command in ["splits", "letter_splits"]:
+        run_character_split_viewer()
 
     elif args.command == "clean":
         clean_outputs()

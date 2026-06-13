@@ -113,6 +113,11 @@ def create_output_folders(output_dir):
             "character_unit_proposer",
             "segments",
         ),
+        "character_unit_debug": os.path.join(
+            output_dir,
+            "character_unit_proposer",
+            "debug",
+        ),
     }
     ensure_dir(
         folders["root"],
@@ -529,7 +534,7 @@ def print_summary(document_id, summary, metadata_path):
     print("Handwritten text units:", summary["handwritten_text_units_count"])
     print("Recovery flagged:", summary["character_unit_recovery_count"])
     print("Split hypotheses:", summary["character_unit_split_hypothesis_count"])
-    print("Non-materialized split hints:", summary["character_unit_split_hint_count"])
+    print("Trace-validated split hints:", summary["character_unit_split_hint_count"])
     print("Skipped:", summary["skipped_count"])
     print("Failed:", summary["failed_count"])
     print("Metadata:", metadata_path)
@@ -591,6 +596,7 @@ def build_handwriting_expert_map(
                 propose_character_units(
                     handwritten_text_unit=handwritten_text_unit,
                     folders=folders,
+                    settings=settings.get("character_unit_proposer", {}),
                 )
             )
 

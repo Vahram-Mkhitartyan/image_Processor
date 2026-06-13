@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Armenian OCR Control Room</title>
+  <link rel="icon" type="image/png" sizes="256x256" href="/static/favicon.png">
+  <link rel="shortcut icon" href="/static/favicon.ico">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -139,6 +141,16 @@
           <button class="stage-tab" data-stage="n03">N03</button>
           <button class="stage-tab" data-stage="n04">N04</button>
           <button class="stage-tab" data-stage="n05">N05</button>
+          <button
+            class="stage-tab"
+            data-stage="n05"
+            data-query="character_unit_proposer/debug"
+          >SPLITS</button>
+          <button
+            class="stage-tab"
+            data-stage="n05"
+            data-query="_visual.png"
+          >LETTERS</button>
         </div>
 
         <div class="trace-layout">
@@ -148,7 +160,18 @@
               <strong>No artifact selected</strong>
               <span>Choose an image from the contact sheet.</span>
             </div>
-            <img id="artifact-preview" alt="Selected pipeline artifact">
+            <div id="preview-viewport" class="preview-viewport">
+              <img
+                id="artifact-preview"
+                alt="Selected pipeline artifact"
+                draggable="false"
+              >
+            </div>
+            <div class="zoom-controls" aria-label="Image zoom controls">
+              <button id="zoom-out" type="button" title="Zoom out">−</button>
+              <button id="zoom-reset" type="button" title="Reset zoom">100%</button>
+              <button id="zoom-in" type="button" title="Zoom in">+</button>
+            </div>
             <div id="preview-caption" class="preview-caption">
               <div>
                 <span id="preview-kind" class="artifact-kind">artifact</span>

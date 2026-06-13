@@ -535,9 +535,6 @@ h2 {
   position: relative;
   min-height: 390px;
   overflow: hidden;
-  display: grid;
-  align-items: start;
-  justify-items: center;
   padding: 22px 20px 82px;
   border-right: 1px solid var(--line);
   background:
@@ -550,20 +547,45 @@ h2 {
   background-position: 0 0, 0 11px, 11px -11px, -11px 0;
 }
 
-#artifact-preview {
+.preview-viewport {
+  width: 100%;
+  height: 100%;
+  min-height: 286px;
+  overflow: hidden;
   display: none;
+  align-items: flex-start;
+  justify-content: center;
+  cursor: zoom-in;
+  touch-action: none;
+}
+
+.preview-viewport.zoomed {
+  cursor: grab;
+}
+
+.preview-viewport.dragging {
+  cursor: grabbing;
+}
+
+#artifact-preview {
+  display: block;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   image-rendering: auto;
+  transform-origin: center top;
+  user-select: none;
+  will-change: transform;
   filter: drop-shadow(0 12px 18px rgba(16, 40, 76, 0.16));
 }
 
 .preview-empty {
+  position: absolute;
+  inset: 22px 20px 82px;
   display: grid;
   place-items: center;
+  align-content: center;
   gap: 5px;
-  margin-top: 110px;
   color: var(--ink-soft);
 }
 
@@ -574,6 +596,50 @@ h2 {
 .empty-glyph {
   font-size: 40px;
   color: var(--orange);
+}
+
+.zoom-controls {
+  position: absolute;
+  z-index: 3;
+  top: 12px;
+  right: 12px;
+  display: none;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: rgba(8, 16, 28, 0.92);
+  box-shadow: 0 7px 20px rgba(0, 0, 0, 0.28);
+}
+
+.zoom-controls.visible {
+  display: flex;
+}
+
+.zoom-controls button {
+  min-width: 34px;
+  height: 32px;
+  padding: 0 9px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+  font: 700 11px/1 var(--mono);
+}
+
+.zoom-controls button:last-child {
+  border-right: 0;
+}
+
+.zoom-controls button:hover {
+  color: var(--orange);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+#zoom-reset {
+  min-width: 58px;
+  color: var(--ink-soft);
+  font-size: 9px;
 }
 
 .preview-caption {

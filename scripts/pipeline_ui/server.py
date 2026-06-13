@@ -690,6 +690,8 @@ def launch_pipeline_ui(
     base_dir: str,
     controller_script: str,
     python_executable: str,
+    initial_stage: str | None = None,
+    initial_query: str | None = None,
 ) -> None:
     """Launch the local control room and block until Ctrl+C."""
     host = "127.0.0.1"
@@ -700,7 +702,13 @@ def launch_pipeline_ui(
         python_executable=Path(python_executable),
     )
     server, port = _build_server(application, host, preferred_port)
-    url = f"http://{host}:{port}"
+    query_parameters = []
+    if initial_stage:
+        query_parameters.append("stage=" + quote(initial_stage, safe=""))
+    if initial_query:
+        query_parameters.append("query=" + quote(initial_query, safe=""))
+    query_string = "?" + "&".join(query_parameters) if query_parameters else ""
+    url = f"http://{host}:{port}{query_string}"
 
     print("Armenian OCR Pipeline Control Room")
     print("----------------------------------")

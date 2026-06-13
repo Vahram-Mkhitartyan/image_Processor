@@ -9,9 +9,11 @@ prepares a coordinate-aware handwriting map and orchestrates four independent
 recognition experts. The experts will eventually produce competing evidence for
 a learned consensus model.
 
-Before any expert runs, v0.3.1 also builds deterministic character-unit
-segmentation hypotheses. This proposal layer is shared by every expert and does
-not perform recognition itself.
+Before any expert runs, N05 also builds deterministic character-unit
+segmentation hypotheses. The current implementation uses ScribeTrace geometry:
+image-space projection valleys propose boundaries and the thinned skeleton
+validates blank gaps or narrow left-to-right cursive bridges. It does not
+perform recognition or choose a final sequence.
 
 Current Status
 --------------
@@ -81,10 +83,15 @@ Current Flow
 5. Always create a whole-unit character hypothesis.
 6. Measure mask geometry, borders, connected components, and vertical
    projection valleys.
-7. Add recovery flags and up to five JSON-only projection-valley split hints.
-8. Build the four-expert registry from settings.json.
-9. Keep existing experts on the original whole-unit crop for now.
-10. Save every proposal inside the handwriting text map.
+7. Attach small floating upper marks to the nearest plausible lower/main
+   component so they are preserved with that character candidate.
+8. Thin the mask with Zhang-Suen and validate valley cuts against skeleton
+   crossings.
+9. Sort accepted boundaries left-to-right and materialize one contiguous
+   character-sequence hypothesis plus a debug overlay.
+10. Build the four-expert registry from settings.json.
+11. Keep existing experts on the original whole-unit crop for now.
+12. Save every proposal inside the handwriting text map.
 
 The universal proposer no longer writes segment images. Each recognition expert
 will own its eventual segmentation strategy. copy_selected_crops can be enabled
@@ -109,13 +116,26 @@ Each proposal contains:
         Diagnostic flags for border contact, unusually wide units, and many
         disconnected components. Recovery flags do not reject a crop.
 
-    vertical_projection_split hypotheses
-        At most five deterministic two-segment alternatives ranked by valley
-        depth and left/right ink balance.
+    trace_supported_character_sequence hypothesis
+        One ordered sequence containing every accepted character crop. A blank
+        gap must separate meaningful left/right vector groups. A joined-letter
+        cut must identify one exact non-loop TracePath edge; virtually removing
+        it must create exactly two substantial, side-dominant vector subgraphs
+        away from junctions.
+
+The debug overlay labels accepted boundaries as:
+
+    G
+        Existing disconnected vector groups separated by blank space.
+
+    P12:7
+        Connector TracePath 12 split after ordered path point 7.
 
 The proposer never runs OCR or Random Forest inference, never modifies source
-artifacts, and never retries recursively. Segment hypotheses are evidence only;
-expert routing over those segments belongs to a later version.
+artifacts, and never retries recursively. It saves new mask and visual crops
+under character_unit_proposer/segments/. The complete h0_whole input remains
+the mandatory fallback. Segment hypotheses are evidence only; expert scoring
+and final sequence selection belong to a later version.
 
 Crop selection priority:
 
@@ -146,6 +166,7 @@ Output Folder
         crops/mixed/
         crops/fallback_from_printed_only/
         character_unit_proposer/segments/
+        character_unit_proposer/debug/
         metadata/<document_id>_handwritten_text_map.json
         debug/skeletons/
         debug/overlays/

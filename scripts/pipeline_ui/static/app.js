@@ -6,6 +6,12 @@ const state = {
   logOffset: 0,
   lastProcessSignature: "",
   artifactSearchTimer: null,
+  previewZoom: 1,
+  previewPanX: 0,
+  previewPanY: 0,
+  previewDragging: false,
+  previewDragX: 0,
+  previewDragY: 0,
 };
 
 const elements = {
@@ -25,6 +31,7 @@ const elements = {
   previewKind: document.querySelector("#preview-kind"),
   previewName: document.querySelector("#preview-name"),
   previewPath: document.querySelector("#preview-path"),
+  previewViewport: document.querySelector("#preview-viewport"),
   projectRoot: document.querySelector("#project-root"),
   refreshArtifacts: document.querySelector("#refresh-artifacts"),
   stopButton: document.querySelector("#stop-button"),
@@ -32,6 +39,10 @@ const elements = {
   toast: document.querySelector("#toast"),
   traceTitle: document.querySelector("#trace-title"),
   updatedAt: document.querySelector("#updated-at"),
+  zoomControls: document.querySelector(".zoom-controls"),
+  zoomIn: document.querySelector("#zoom-in"),
+  zoomOut: document.querySelector("#zoom-out"),
+  zoomReset: document.querySelector("#zoom-reset"),
 };
 
 async function requestJson(url, options = {}) {
@@ -187,6 +198,31 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function applyPreviewTransform() {
+  elements.artifactPreview.style.transform = (
+    `translate(${state.previewPanX}px, ${state.previewPanY}px) `
+    + `scale(${state.previewZoom})`
+  );
+  elements.zoomReset.textContent = `${Math.round(state.previewZoom * 100)}%`;
+  elements.previewViewport.classList.toggle("zoomed", state.previewZoom > 1);
+}
+
+function resetPreviewZoom() {
+  state.previewZoom = 1;
+  state.previewPanX = 0;
+  state.previewPanY = 0;
+  applyPreviewTransform();
+}
+
+function setPreviewZoom(nextZoom) {
+  state.previewZoom = Math.min(8, Math.max(0.5, nextZoom));
+  if (state.previewZoom <= 1) {
+    state.previewPanX = 0;
+    state.previewPanY = 0;
+  }
+  applyPreviewTransform();
+}
+
 function selectArtifact(artifact, card) {
   state.selectedArtifactPath = artifact.relative_path;
   document.querySelectorAll(".artifact-card").forEach(
@@ -194,7 +230,9 @@ function selectArtifact(artifact, card) {
   );
   card.classList.add("active");
   elements.previewEmpty.style.display = "none";
-  elements.artifactPreview.style.display = "block";
+  elements.previewViewport.style.display = "flex";
+  elements.zoomControls.classList.add("visible");
+  resetPreviewZoom();
   elements.artifactPreview.src = artifact.url;
   elements.previewKind.textContent = `${artifact.stage} · ${artifact.kind}`;
   elements.previewName.textContent = artifact.name;
@@ -260,7 +298,7 @@ async function loadArtifacts() {
     document: state.selectedDocument,
     stage: state.selectedStage,
     query: elements.artifactSearch.value.trim(),
-    limit: "240",
+    limit: "500",
   });
   elements.contactSheet.innerHTML = (
     '<div class="empty-sheet">Scanning pipeline artifacts...</div>'
@@ -345,6 +383,7 @@ document.querySelectorAll(".stage-tab").forEach((button) => {
     );
     button.classList.add("active");
     state.selectedStage = button.dataset.stage;
+    elements.artifactSearch.value = button.dataset.query || "";
     state.selectedArtifactPath = null;
     loadArtifacts();
   });
@@ -362,7 +401,67 @@ elements.artifactSearch.addEventListener("input", () => {
   state.artifactSearchTimer = window.setTimeout(loadArtifacts, 260);
 });
 
+elements.zoomIn.addEventListener("click", () => {
+  setPreviewZoom(state.previewZoom * 1.25);
+});
+elements.zoomOut.addEventListener("click", () => {
+  setPreviewZoom(state.previewZoom / 1.25);
+});
+elements.zoomReset.addEventListener("click", resetPreviewZoom);
+
+elements.previewViewport.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  setPreviewZoom(
+    state.previewZoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15),
+  );
+}, { passive: false });
+
+elements.previewViewport.addEventListener("dblclick", resetPreviewZoom);
+
+elements.previewViewport.addEventListener("pointerdown", (event) => {
+  if (state.previewZoom <= 1) return;
+  state.previewDragging = true;
+  state.previewDragX = event.clientX - state.previewPanX;
+  state.previewDragY = event.clientY - state.previewPanY;
+  elements.previewViewport.classList.add("dragging");
+  elements.previewViewport.setPointerCapture(event.pointerId);
+});
+
+elements.previewViewport.addEventListener("pointermove", (event) => {
+  if (!state.previewDragging) return;
+  state.previewPanX = event.clientX - state.previewDragX;
+  state.previewPanY = event.clientY - state.previewDragY;
+  applyPreviewTransform();
+});
+
+function stopPreviewDrag(event) {
+  state.previewDragging = false;
+  elements.previewViewport.classList.remove("dragging");
+  if (event.pointerId !== undefined
+      && elements.previewViewport.hasPointerCapture(event.pointerId)) {
+    elements.previewViewport.releasePointerCapture(event.pointerId);
+  }
+}
+
+elements.previewViewport.addEventListener("pointerup", stopPreviewDrag);
+elements.previewViewport.addEventListener("pointercancel", stopPreviewDrag);
+
 async function boot() {
+  const urlParameters = new URLSearchParams(window.location.search);
+  const requestedStage = urlParameters.get("stage");
+  const requestedQuery = urlParameters.get("query");
+  if (requestedStage) {
+    state.selectedStage = requestedStage;
+  }
+  if (requestedQuery) {
+    elements.artifactSearch.value = requestedQuery;
+  }
+  document.querySelectorAll(".stage-tab").forEach((button) => {
+    const matchesStage = button.dataset.stage === state.selectedStage;
+    const buttonQuery = button.dataset.query || "";
+    const matchesQuery = buttonQuery === elements.artifactSearch.value;
+    button.classList.toggle("active", matchesStage && matchesQuery);
+  });
   await loadOverview({ refreshArtifacts: true });
   await pollLogs();
   window.setInterval(pollLogs, 700);
