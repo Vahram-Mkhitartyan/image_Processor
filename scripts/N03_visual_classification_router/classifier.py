@@ -184,7 +184,12 @@ def create_output_folders(output_dir):
         "debug": f"{output_dir}/debug",
     }
 
-    for folder in folders.values():
+    for folder in (
+        folders["root"],
+        folders["classified"],
+        folders["metadata"],
+        folders["debug"],
+    ):
         ensure_dir(folder)
 
     return folders
@@ -528,7 +533,12 @@ def get_skip_reason_for_group(group, settings):
 
 # ROUTE RECORD HELPERS---------------------------------------
 
-def copy_crop_to_visual_class_folder(crop_path, folders, visual_class):
+def copy_crop_to_visual_class_folder(
+    crop_path,
+    folders,
+    visual_class,
+    save_copy=False,
+):
     """
     Copy the crop Minos actually used into its N03 visual class folder.
 
@@ -540,9 +550,13 @@ def copy_crop_to_visual_class_folder(crop_path, folders, visual_class):
     Then crop is copied into:
         output_dir/classified/mixed/
     """
+    if not save_copy:
+        return os.path.abspath(crop_path)
+
     if visual_class not in folders:
         visual_class = "review"
 
+    ensure_dir(folders[visual_class])
     file_name = os.path.basename(crop_path)
 
     target_path = f"{folders[visual_class]}/{file_name}"
@@ -610,6 +624,21 @@ def build_route_record(group, classification, routed_crop_path):
         "minos_mode": group.get("minos_mode"),
         "is_final_text_candidate": group.get("is_final_text_candidate", True),
         "preserve_as_evidence": group.get("preserve_as_evidence", False),
+        "force_handwritten_ocr": group.get("force_handwritten_ocr", False),
+        "correction_role": group.get("correction_role"),
+        "crossing_red_source_group_ids": group.get(
+            "crossing_red_source_group_ids",
+            [],
+        ),
+        "replacement_red_source_group_ids": group.get(
+            "replacement_red_source_group_ids",
+            [],
+        ),
+        "replaces_blue_source_group_ids": group.get(
+            "replaces_blue_source_group_ids",
+            [],
+        ),
+        "correction_evidence": group.get("correction_evidence", []),
         "n02_policy": group.get("policy"),
 
         # N02 status metadata.
@@ -629,6 +658,33 @@ def build_route_record(group, classification, routed_crop_path):
             "thresholds": classification["thresholds"],
         },
     }
+
+
+def build_forced_handwriting_route_record(group):
+    """Build an N05 route for known red replacement text without running Minos."""
+    classification = {
+        "visual_class": "handwriting_only",
+        "recommended_route": "N05_handwritten_ocr",
+        "scores": {},
+        "thresholds": {},
+    }
+    record = build_route_record(
+        group=group,
+        classification=classification,
+        routed_crop_path=group.get("classification_crop_path"),
+    )
+    record["minos_input_crop_path"] = None
+    record["minos_input_crop_source"] = None
+    record["minos_skipped"] = True
+    record["skip_reason"] = "known_red_replacement_direct_to_handwritten_ocr"
+    record["route"] = "N05_handwritten_ocr"
+    record["visual_classification"].update({
+        "model": None,
+        "model_version": None,
+        "routing_method": "n02_red_correction_pairing",
+        "minos_attempted": False,
+    })
+    return record
 
 
 def build_skipped_record(group, settings):
@@ -668,6 +724,21 @@ def build_skipped_record(group, settings):
 
         "is_final_text_candidate": group.get("is_final_text_candidate", True),
         "preserve_as_evidence": group.get("preserve_as_evidence", False),
+        "force_handwritten_ocr": group.get("force_handwritten_ocr", False),
+        "correction_role": group.get("correction_role"),
+        "crossing_red_source_group_ids": group.get(
+            "crossing_red_source_group_ids",
+            [],
+        ),
+        "replacement_red_source_group_ids": group.get(
+            "replacement_red_source_group_ids",
+            [],
+        ),
+        "replaces_blue_source_group_ids": group.get(
+            "replaces_blue_source_group_ids",
+            [],
+        ),
+        "correction_evidence": group.get("correction_evidence", []),
 
         "route": group.get("recommended_next_node", "review"),
 
@@ -775,6 +846,7 @@ def summarize_routes(route_records, skipped_records, failed_records):
         "handwriting_only_count": 0,
         "empty_or_noise_count": 0,
         "review_count": 0,
+        "forced_handwriting_route_count": 0,
 
         "skipped_by_policy_count": 0,
         "skipped_rejected_count": 0,
@@ -783,6 +855,8 @@ def summarize_routes(route_records, skipped_records, failed_records):
 
     for record in route_records:
         visual_class = record["visual_classification"]["visual_class"]
+        if record.get("force_handwritten_ocr"):
+            summary["forced_handwriting_route_count"] += 1
 
         if visual_class == "mixed":
             summary["mixed_count"] += 1
@@ -832,6 +906,7 @@ def print_summary(document_id, summary, metadata_path):
     print("Handwriting only:", summary["handwriting_only_count"])
     print("Empty/noise:", summary["empty_or_noise_count"])
     print("Review:", summary["review_count"])
+    print("Forced red replacements:", summary["forced_handwriting_route_count"])
     print("Skipped by N02 policy:", summary["skipped_by_policy_count"])
     print("Skipped rejected:", summary["skipped_rejected_count"])
     print("Skipped missing crop:", summary["skipped_missing_crop_count"])
@@ -903,6 +978,10 @@ def classify_document(
         "include_rejected",
         False,
     )
+    settings["save_classified_copies"] = settings.get(
+        "save_classified_copies",
+        False,
+    )
 
     # By default, reruns clear previous N03 output.
     reset_output = settings.get(
@@ -936,6 +1015,12 @@ def classify_document(
     failed_records = []
 
     for group in refined_groups:
+        if group.get("force_handwritten_ocr"):
+            route_records.append(
+                build_forced_handwriting_route_record(group)
+            )
+            continue
+
         # Respect N02 policy/status before running Minos.
         if not should_process_refined_group(group, settings):
             skipped_records.append(
@@ -966,6 +1051,7 @@ def classify_document(
                 crop_path=minos_input_crop_path,
                 folders=folders,
                 visual_class=classification["visual_class"],
+                save_copy=settings["save_classified_copies"],
             )
 
             # Build machine-readable route record.
@@ -1009,6 +1095,7 @@ def classify_document(
 
         "thresholds": thresholds,
         "include_rejected": settings["include_rejected"],
+        "save_classified_copies": settings["save_classified_copies"],
 
         "summary": summary,
 

@@ -143,7 +143,6 @@ def process_single_document(document_path):
             "rotate_major",
             "convert_to_grayscale",
             "denoise_image",
-            "improve_contrast",
             "threshold_image",
             "deskew_image",
             "crop_white_margins",
@@ -163,7 +162,9 @@ def process_single_document(document_path):
 
         scribemap = ScribeMapBWDetector(
             settings={
-                "save_group_crops": True,
+                # N02 owns the canonical full-text crops. Saving the legacy
+                # content-mask groups here only duplicates unused images.
+                "save_group_crops": False,
             }
         )
 

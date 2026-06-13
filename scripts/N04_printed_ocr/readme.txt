@@ -24,8 +24,8 @@ Current Flow
 ------------
 1. Load N03 route metadata.
 2. Select printed_only and mixed routes.
-3. Copy the best available crop.
-4. Scale and pad a Tesseract-ready crop.
+3. Reference the canonical N02 full-text crop without duplicating it.
+4. Normalize to dark ink on white, then scale and pad a Tesseract-ready crop.
 5. Run primary and fallback Armenian OCR configurations.
 6. Store raw candidates, coordinates, skips, failures, and summary metadata.
 
@@ -39,9 +39,17 @@ OCR Engine
 
 Crop selection priority:
 
+    classification_crop_path
     routed_crop_path
+    analysis_crop_path
     refined_crop_path
+    original_crop_path
     source_crop_path
+
+analysis_mask_crop_path is intentionally excluded because it is the inverted
+white-ink-on-black topology mask for ScribeTrace. N04 starts from the regular
+full-text visual crop, converts it to grayscale, enforces dark ink on a white
+background, and uses normal Otsu binary thresholding.
 
 Files
 -----
@@ -83,8 +91,6 @@ Output Folder
 -------------
 
     temp_processing/<document_id>/n04_printed_ocr/
-        crops/printed_only/
-        crops/mixed/
         tesseract_ready/printed_only/
         tesseract_ready/mixed/
         metadata/<document_id>_printed_text_map.json

@@ -83,6 +83,134 @@ def grow_seed_mask_through_candidates(seed_pixels, candidate_pixels, iterations=
     return grown, grown & ~np.asarray(seed_pixels, dtype=bool)
 
 
+def shift_boolean_mask(mask, dx, dy):
+    """Shift a boolean mask without wrapping pixels around image borders.
+
+    Args:
+        mask: Two-dimensional boolean-compatible mask.
+        dx: Horizontal shift in pixels; positive values move pixels right.
+        dy: Vertical shift in pixels; positive values move pixels down.
+
+    Returns:
+        Shifted boolean mask with newly exposed pixels set to False.
+    """
+    source = np.asarray(mask, dtype=bool)
+    height, width = source.shape
+    shifted = np.zeros_like(source)
+
+    source_x1 = max(0, -dx)
+    source_x2 = min(width, width - dx)
+    source_y1 = max(0, -dy)
+    source_y2 = min(height, height - dy)
+
+    if source_x1 >= source_x2 or source_y1 >= source_y2:
+        return shifted
+
+    destination_x1 = source_x1 + dx
+    destination_x2 = source_x2 + dx
+    destination_y1 = source_y1 + dy
+    destination_y2 = source_y2 + dy
+
+    shifted[
+        destination_y1:destination_y2,
+        destination_x1:destination_x2,
+    ] = source[source_y1:source_y2, source_x1:source_x2]
+
+    return shifted
+
+
+def find_cross_color_bridge_pixels(target_mask, donor_mask, radius=4):
+    """Find donor-color pixels that bridge two opposing target-stroke sides.
+
+    The detector checks four undirected axes: horizontal, vertical, and both
+    diagonals. A donor pixel is accepted only when target ink exists on both
+    sides of at least one axis within ``radius`` pixels.
+
+    Args:
+        target_mask: Exclusive semantic mask whose continuity is being repaired.
+        donor_mask: Other-color pixels that may occupy a true crossing.
+        radius: Maximum distance searched on either side of a donor pixel.
+
+    Returns:
+        Binary uint8 mask containing only accepted borrowed crossing pixels.
+    """
+    target = np.asarray(target_mask) > 0
+    donor = np.asarray(donor_mask) > 0
+    search_radius = max(1, min(int(radius), 12))
+    bridge_support = np.zeros_like(target)
+
+    for dx, dy in ((1, 0), (0, 1), (1, 1), (1, -1)):
+        side_a = np.zeros_like(target)
+        side_b = np.zeros_like(target)
+
+        for distance in range(1, search_radius + 1):
+            side_a |= shift_boolean_mask(
+                target,
+                dx * distance,
+                dy * distance,
+            )
+            side_b |= shift_boolean_mask(
+                target,
+                -dx * distance,
+                -dy * distance,
+            )
+
+        bridge_support |= side_a & side_b
+
+    return (donor & bridge_support).astype(np.uint8) * 255
+
+
+def create_cross_color_continuity_masks(red_mask, blue_mask, settings):
+    """Create trace-safe red/blue masks while preserving semantic ownership.
+
+    Exclusive masks remain the source of truth for color classification. These
+    continuity masks may overlap only at geometrically supported crossings so
+    skeleton-based consumers do not see artificial breaks.
+
+    Args:
+        red_mask: Exclusive red semantic mask.
+        blue_mask: Exclusive blue semantic mask.
+        settings: Configuration dictionary containing continuity options.
+
+    Returns:
+        Dictionary with repaired masks, borrowed-pixel masks, and pixel counts.
+    """
+    red = np.asarray(red_mask, dtype=np.uint8)
+    blue = np.asarray(blue_mask, dtype=np.uint8)
+
+    if not settings.get("cross_color_continuity_enabled", True):
+        empty = np.zeros_like(red)
+        return {
+            "red_continuity_mask": red.copy(),
+            "blue_continuity_mask": blue.copy(),
+            "red_borrowed_bridge_mask": empty.copy(),
+            "blue_borrowed_bridge_mask": empty,
+            "red_borrowed_bridge_pixels": 0,
+            "blue_borrowed_bridge_pixels": 0,
+        }
+
+    radius = settings.get("cross_color_bridge_radius_px", 4)
+    blue_borrowed = find_cross_color_bridge_pixels(
+        target_mask=blue,
+        donor_mask=red,
+        radius=radius,
+    )
+    red_borrowed = find_cross_color_bridge_pixels(
+        target_mask=red,
+        donor_mask=blue,
+        radius=radius,
+    )
+
+    return {
+        "red_continuity_mask": cv2.bitwise_or(red, red_borrowed),
+        "blue_continuity_mask": cv2.bitwise_or(blue, blue_borrowed),
+        "red_borrowed_bridge_mask": red_borrowed,
+        "blue_borrowed_bridge_mask": blue_borrowed,
+        "red_borrowed_bridge_pixels": int(np.count_nonzero(red_borrowed)),
+        "blue_borrowed_bridge_pixels": int(np.count_nonzero(blue_borrowed)),
+    }
+
+
 def create_basic_color_ink_masks(image, settings):
     """Create exclusive color ink masks from a BGR color image.
 
@@ -327,13 +455,13 @@ def create_basic_color_ink_masks(image, settings):
 
     if settings.get("seeded_edge_recovery_enabled", True):
         edge_min_saturation = settings.get(
-            "seeded_edge_min_saturation", 25
+            "seeded_edge_min_saturation", 23
         )
-        edge_min_chroma = settings.get("seeded_edge_min_chroma", 10)
+        edge_min_chroma = settings.get("seeded_edge_min_chroma", 9)
         edge_channel_margin = settings.get(
-            "seeded_edge_channel_margin", 5
+            "seeded_edge_channel_margin", 4
         )
-        edge_max_value = settings.get("seeded_edge_max_value", 238)
+        edge_max_value = settings.get("seeded_edge_max_value", 240)
         edge_dark_max_value = settings.get(
             "seeded_edge_dark_max_value", 185
         )
@@ -474,6 +602,11 @@ def create_basic_color_ink_masks(image, settings):
     )
 
     exclusive_overlap_pixels = int(np.count_nonzero(overlap_count > 1))
+    continuity_masks = create_cross_color_continuity_masks(
+        red_mask=red_ink_mask,
+        blue_mask=blue_ink_mask,
+        settings=settings,
+    )
 
     return {
         "red_ink_mask": red_ink_mask,
@@ -492,6 +625,7 @@ def create_basic_color_ink_masks(image, settings):
         "seeded_green_edge_mask":
             seeded_green_edge_pixels.astype("uint8") * 255,
         "exclusive_overlap_pixels": exclusive_overlap_pixels,
+        **continuity_masks,
     }
 
 

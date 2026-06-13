@@ -18,11 +18,8 @@ from file_preparation_scribemap_masks import (
 
 DENOISE_STRENGTH = 10
 
-CLAHE_CLIP_LIMIT = 2.0
-CLAHE_TILE_GRID_SIZE = (8, 8)
-
 THRESHOLD_BLOCK_SIZE = 35
-THRESHOLD_C = 15
+THRESHOLD_C = 14
 
 CROP_PADDING = 20
 
@@ -66,8 +63,6 @@ def create_initial_state(input_path, output_dir, settings=None):
         "settings": {
             "manual_major_rotation": settings.get("manual_major_rotation", MANUAL_MAJOR_ROTATION),
             "denoise_strength": settings.get("denoise_strength", DENOISE_STRENGTH),
-            "clahe_clip_limit": settings.get("clahe_clip_limit", CLAHE_CLIP_LIMIT),
-            "clahe_tile_grid_size": settings.get("clahe_tile_grid_size", CLAHE_TILE_GRID_SIZE),
             "threshold_block_size": settings.get("threshold_block_size", THRESHOLD_BLOCK_SIZE),
             "threshold_c": settings.get("threshold_c", THRESHOLD_C),
             "crop_padding": settings.get("crop_padding", CROP_PADDING),
@@ -103,11 +98,20 @@ def create_initial_state(input_path, output_dir, settings=None):
 
             "seeded_edge_recovery_enabled": settings.get("seeded_edge_recovery_enabled", True),
             "seeded_edge_recovery_iterations": settings.get("seeded_edge_recovery_iterations", 1),
-            "seeded_edge_min_saturation": settings.get("seeded_edge_min_saturation", 25),
-            "seeded_edge_min_chroma": settings.get("seeded_edge_min_chroma", 10),
-            "seeded_edge_channel_margin": settings.get("seeded_edge_channel_margin", 5),
-            "seeded_edge_max_value": settings.get("seeded_edge_max_value", 238),
+            "seeded_edge_min_saturation": settings.get("seeded_edge_min_saturation", 23),
+            "seeded_edge_min_chroma": settings.get("seeded_edge_min_chroma", 9),
+            "seeded_edge_channel_margin": settings.get("seeded_edge_channel_margin", 4),
+            "seeded_edge_max_value": settings.get("seeded_edge_max_value", 240),
             "seeded_edge_dark_max_value": settings.get("seeded_edge_dark_max_value", 185),
+
+            "cross_color_continuity_enabled": settings.get(
+                "cross_color_continuity_enabled",
+                True,
+            ),
+            "cross_color_bridge_radius_px": settings.get(
+                "cross_color_bridge_radius_px",
+                4,
+            ),
 
             "black_ink_max_saturation": settings.get("black_ink_max_saturation", 85),
             "black_ink_max_value": settings.get("black_ink_max_value", 180),
@@ -248,31 +252,8 @@ def step_denoise_image(state):
     return state
 
 
-def step_improve_contrast(state):
-    """Improve local contrast before thresholding.
-
-    Args:
-        state: Mutable pipeline state dictionary.
-
-    Returns:
-        Computed result for the caller.
-    """
-    preprocessor = ImagePreprocessor(state["settings"])
-
-    image = state["images"]["current"]
-    enhanced = preprocessor.improve_contrast(image)
-
-    state["images"]["enhanced"] = enhanced
-    state["images"]["current"] = enhanced
-
-    state["metadata"]["steps_completed"].append("improve_contrast")
-    state["metadata"]["shapes"]["enhanced"] = list(enhanced.shape)
-
-    return state
-
-
 def step_threshold_image(state):
-    """Convert the enhanced image into a binary image.
+    """Convert the denoised grayscale image into a binary image.
 
     Args:
         state: Mutable pipeline state dictionary.
@@ -423,6 +404,14 @@ def step_create_color_layer_masks(state):
     state["images"]["unknown_color_ink_mask"] = color_masks["unknown_color_ink_mask"]
     state["images"]["colored_ink_mask"] = color_masks["colored_ink_mask"]
     state["images"]["black_ink_mask"] = color_masks["black_ink_mask"]
+    state["images"]["red_continuity_mask"] = color_masks["red_continuity_mask"]
+    state["images"]["blue_continuity_mask"] = color_masks["blue_continuity_mask"]
+    state["images"]["red_borrowed_bridge_mask"] = color_masks[
+        "red_borrowed_bridge_mask"
+    ]
+    state["images"]["blue_borrowed_bridge_mask"] = color_masks[
+        "blue_borrowed_bridge_mask"
+    ]
     state["images"]["recovered_blue_dark_mask"] = color_masks["recovered_blue_dark_mask"]
     state["images"]["recovered_red_dark_mask"] = color_masks["recovered_red_dark_mask"]
     state["images"]["recovered_green_dark_mask"] = color_masks["recovered_green_dark_mask"]
@@ -467,6 +456,21 @@ def step_create_color_layer_masks(state):
         "unknown_color_ink_pixels": int((color_masks["unknown_color_ink_mask"] > 0).sum()),
         "colored_ink_pixels": int((color_masks["colored_ink_mask"] > 0).sum()),
         "black_ink_pixels": int((color_masks["black_ink_mask"] > 0).sum()),
+        "red_continuity_pixels": int(
+            (color_masks["red_continuity_mask"] > 0).sum()
+        ),
+        "blue_continuity_pixels": int(
+            (color_masks["blue_continuity_mask"] > 0).sum()
+        ),
+        "red_borrowed_bridge_pixels": color_masks[
+            "red_borrowed_bridge_pixels"
+        ],
+        "blue_borrowed_bridge_pixels": color_masks[
+            "blue_borrowed_bridge_pixels"
+        ],
+        "cross_color_bridge_radius_px": int(
+            settings.get("cross_color_bridge_radius_px", 4)
+        ),
         "seeded_red_edge_pixels": int(
             (color_masks["seeded_red_edge_mask"] > 0).sum()
         ),
@@ -579,7 +583,6 @@ STEP_REGISTRY = {
     "rotate_major": step_rotate_major,
     "convert_to_grayscale": step_convert_to_grayscale,
     "denoise_image": step_denoise_image,
-    "improve_contrast": step_improve_contrast,
     "threshold_image": step_threshold_image,
     "deskew_image": step_deskew_image,
     "crop_white_margins": step_crop_white_margins,
@@ -633,7 +636,6 @@ if __name__ == "__main__":
         "rotate_major",
         "convert_to_grayscale",
         "denoise_image",
-        "improve_contrast",
         "threshold_image",
         "deskew_image",
         "crop_white_margins",

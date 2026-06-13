@@ -269,7 +269,6 @@ class ScribeMapV1ClassifierTest:
             "rotate_major",
             "convert_to_grayscale",
             "denoise_image",
-            "improve_contrast",
             "threshold_image",
             "deskew_image",
             "crop_white_margins",

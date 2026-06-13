@@ -54,6 +54,9 @@ def build_printed_text_unit(
         # N04-owned copies.
         "n04_copied_crop_path": copied_crop_path,
         "tesseract_ready_crop_path": tesseract_ready_crop_path,
+        "tesseract_input_source": "classification_crop_path",
+        "tesseract_input_polarity": "dark_ink_on_white_background",
+        "analysis_mask_used_for_tesseract": False,
 
         # Color/layer provenance.
         "mask_source": route_record.get("mask_source"),

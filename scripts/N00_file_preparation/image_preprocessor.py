@@ -114,38 +114,22 @@ class ImagePreprocessor:
             searchWindowSize=21
         )
 
-    def improve_contrast(self, denoised):
-        """Apply contrast enhancement to a grayscale image.
-        
-        Args:
-            denoised: Value used by this function.
-        
-        Returns:
-            Contrast-enhanced grayscale image array.
-        """
-        clahe = cv2.createCLAHE(
-            clipLimit=self.settings.get("clahe_clip_limit", 2.0),
-            tileGridSize=self.settings.get("clahe_tile_grid_size", (8, 8))
-        )
-
-        return clahe.apply(denoised)
-
-    def threshold_image(self, enhanced):
+    def threshold_image(self, denoised):
         """Create a binary thresholded image.
         
         Args:
-            enhanced: Value used by this function.
+            denoised: Denoised grayscale image.
         
         Returns:
             Binary thresholded image array.
         """
         return cv2.adaptiveThreshold(
-            enhanced,
+            denoised,
             255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY,
             self.settings.get("threshold_block_size", 35),
-            self.settings.get("threshold_c", 15)
+            self.settings.get("threshold_c", 14)
         )
 
     def deskew_image(self, thresholded):

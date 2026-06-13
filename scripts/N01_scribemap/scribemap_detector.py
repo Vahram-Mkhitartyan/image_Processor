@@ -266,6 +266,8 @@ class ScribeMapBWDetector:
             unknown_color_ink_mask_path=artifacts.get("unknown_color_ink_mask"),
             colored_ink_mask_path=artifacts.get("colored_ink_mask"),
             black_ink_mask_path=artifacts.get("black_ink_mask"),
+            blue_continuity_mask_path=artifacts.get("blue_continuity_mask"),
+            red_continuity_mask_path=artifacts.get("red_continuity_mask"),
 
             recovered_blue_dark_mask_path=artifacts.get("recovered_blue_dark_mask"),
             recovered_red_dark_mask_path=artifacts.get("recovered_red_dark_mask"),
@@ -293,6 +295,8 @@ class ScribeMapBWDetector:
         unknown_color_ink_mask_path=None,
         colored_ink_mask_path=None,
         black_ink_mask_path=None,
+        blue_continuity_mask_path=None,
+        red_continuity_mask_path=None,
         recovered_blue_dark_mask_path=None,
         recovered_red_dark_mask_path=None,
         recovered_green_dark_mask_path=None,
@@ -317,6 +321,9 @@ class ScribeMapBWDetector:
             green_ink_mask_path: Optional path to the green-ink mask artifact.
             unknown_color_ink_mask_path: Optional path to the unknown-color-ink mask artifact.
             colored_ink_mask_path: Optional path to the colored-ink mask artifact.
+            black_ink_mask_path: Optional path to the exclusive black-ink mask.
+            blue_continuity_mask_path: Optional crossing-repaired blue trace mask.
+            red_continuity_mask_path: Optional crossing-repaired red trace mask.
             horizontal_line_mask_path: Optional path to the horizontal-line mask artifact.
             short_horizontal_line_mask_path: Optional path to the short-horizontal-line mask artifact.
             combined_horizontal_line_mask_path: Optional path to the combined-horizontal-line mask artifact.
@@ -354,6 +361,13 @@ class ScribeMapBWDetector:
             layer_mask = load_image(mask_path)
             layer_mask = normalize_to_grayscale(layer_mask)
             layer_masks[layer_name] = layer_mask
+
+        # Continuity masks are carried forward for topology consumers. ScribeMap
+        # still detects and classifies groups from the exclusive semantic masks.
+        continuity_mask_paths = {
+            "blue": blue_continuity_mask_path,
+            "red": red_continuity_mask_path,
+        }
 
         # 4) detect components and build filtered groups
         components, raw_groups, groups, rejected_groups = self._build_groups_from_content_mask(
@@ -425,6 +439,7 @@ class ScribeMapBWDetector:
 
             "preparation_artifacts": preparation_artifacts or {},
             "layer_mask_paths": layer_mask_paths,
+            "continuity_mask_paths": continuity_mask_paths,
 
             "component_count": len(components),
             "raw_group_count": len(raw_groups),

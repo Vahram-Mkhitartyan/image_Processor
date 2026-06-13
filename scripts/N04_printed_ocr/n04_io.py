@@ -100,7 +100,13 @@ def create_output_folders(output_dir):
 
     }
 
-    for folder in folders.values():
+    for folder in (
+        folders["root"],
+        folders["tesseract_ready"],
+        folders["tesseract_ready_printed_only"],
+        folders["tesseract_ready_mixed"],
+        folders["metadata"],
+    ):
         ensure_dir(folder)
 
     return folders

@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 from dataclasses import asdict, dataclass
 
 import cv2
@@ -14,6 +15,16 @@ class RefinerSettings:
     layers_to_refine: tuple = ("blue", "red", "green", "unknown_color", "black")
     crop_padding_px: int = 2
     debug_preview_enabled: bool = True
+    correction_routing_enabled: bool = True
+    correction_min_crossing_ink_pixels: int = 6
+    correction_min_horizontal_span_ratio: float = 0.35
+    correction_min_vertical_span_ratio: float = 0.45
+    correction_replacement_max_distance_px: int = 55
+    correction_replacement_min_width_px: int = 8
+    correction_replacement_min_height_px: int = 8
+    correction_replacement_min_area: int = 80
+    correction_replacement_max_aspect_ratio: float = 12.0
+    correction_max_replacements_per_blue: int = 2
 
     def to_dict(self):
         return asdict(self)
@@ -221,35 +232,41 @@ def get_crop_mask_names_for_record(record):
     if layer == "blue":
         return {
             "analysis": ["blue"],
+            "analysis_mask": ["blue_continuity"],
             "context": ["blue", "black"],
         }
 
     if layer == "green":
         return {
             "analysis": ["green"],
+            "analysis_mask": ["green"],
             "context": ["green", "black"],
         }
 
     if layer == "black":
         return {
             "analysis": ["black"],
+            "analysis_mask": ["black"],
             "context": ["black"],
         }
 
     if layer == "red":
         return {
             "analysis": ["red"],
+            "analysis_mask": ["red_continuity"],
             "context": ["red", "blue", "black"],
         }
 
     if layer == "unknown_color":
         return {
             "analysis": ["unknown_color"],
+            "analysis_mask": ["unknown_color"],
             "context": ["unknown_color", "blue", "black"],
         }
 
     return {
         "analysis": [layer],
+        "analysis_mask": [layer],
         "context": [layer],
     }
 
@@ -260,17 +277,14 @@ def save_crop_views_for_record(
     layer_images_by_name,
     output_dir,
 ):
-    """Save original, analysis, context, classification, and mask crop views."""
+    """Save one canonical full-text crop and one topology mask per group."""
     layer = record["layer"]
     text_unit_id = record["text_unit_id"]
     bbox = record["final_bbox"]
 
     crop_dirs = {
-        "original": os.path.join(output_dir, "crops", layer, "original"),
-        "analysis": os.path.join(output_dir, "crops", layer, "analysis"),
-        "context": os.path.join(output_dir, "crops", layer, "context"),
+        "full_text": os.path.join(output_dir, "crops", layer, "full_text"),
         "analysis_mask": os.path.join(output_dir, "crops", layer, "analysis_mask"),
-        "classification": os.path.join(output_dir, "crops", layer, "classification"),
     }
 
     for folder in crop_dirs.values():
@@ -278,57 +292,39 @@ def save_crop_views_for_record(
 
     base_name = f"{layer}_{text_unit_id:04d}_{record['source_group_id']}"
     mask_names = get_crop_mask_names_for_record(record)
-
-    # Full debug view. This may contain multiple layers.
-    # Do not use as the default Minos input.
-    all_visual_layers = ["black", "blue", "red", "green", "unknown_color"]
-
-    original_source = compose_visual_layers(
-        layer_images_by_name=layer_images_by_name,
-        layer_names=all_visual_layers,
-        fallback_image=source_image,
+    analysis_mask_names = [
+        name
+        for name in mask_names["analysis_mask"]
+        if name in masks_by_name
+    ]
+    continuity_repair_used = any(
+        name.endswith("_continuity")
+        for name in analysis_mask_names
     )
-    original_crop, safe_bbox = crop_image(original_source, bbox)
 
-    original_path = os.path.join(crop_dirs["original"], f"{base_name}_original.png")
-    save_image(original_crop, original_path)
+    if not analysis_mask_names:
+        analysis_mask_names = mask_names["analysis"]
 
-    # Target-layer-only visual view.
-    # This is the main classification evidence.
-    analysis_source = compose_visual_layers(
+    # This target-layer-only crop is the single visual artifact used by Minos,
+    # OCR, N05, and the UI. Compatibility fields below all reference this file.
+    full_text_source = compose_visual_layers(
         layer_images_by_name=layer_images_by_name,
         layer_names=mask_names["analysis"],
         fallback_image=source_image,
     )
-    analysis_crop, _ = crop_image(analysis_source, safe_bbox)
-
-    analysis_path = os.path.join(crop_dirs["analysis"], f"{base_name}_analysis.png")
-    save_image(analysis_crop, analysis_path)
-
-    # Save a duplicate under classification/ to make the contract explicit.
-    classification_path = os.path.join(
-        crop_dirs["classification"],
-        f"{base_name}_classification.png",
+    full_text_crop, safe_bbox = crop_image(full_text_source, bbox)
+    full_text_path = os.path.join(
+        crop_dirs["full_text"],
+        f"{base_name}_full_text.png",
     )
-    save_image(analysis_crop, classification_path)
+    save_image(full_text_crop, full_text_path)
 
-    # Context view. Useful for correction resolver / debugging, not default Minos input.
-    context_source = compose_visual_layers(
-        layer_images_by_name=layer_images_by_name,
-        layer_names=mask_names["context"],
-        fallback_image=source_image,
-    )
-    context_crop, _ = crop_image(context_source, safe_bbox)
-
-    context_path = os.path.join(crop_dirs["context"], f"{base_name}_context.png")
-    save_image(context_crop, context_path)
-
-    # Preserve the exact target-layer pixels; ScribeTrace owns any later
-    # topology processing and must not inherit visual context from other layers.
+    # Classification keeps exact semantic pixels. The binary topology mask may
+    # use a separately generated crossing-repaired mask when N00 provided one.
     analysis_mask_crop, _ = build_combined_mask_crop(
         masks_by_name=masks_by_name,
         bbox=safe_bbox,
-        mask_names_to_keep=mask_names["analysis"],
+        mask_names_to_keep=analysis_mask_names,
         reference_image=source_image,
     )
 
@@ -339,40 +335,53 @@ def save_crop_views_for_record(
     save_image(analysis_mask_crop, analysis_mask_path)
 
     visual_layer_source = get_visual_layer_source_name(layer)
-    mask_source = f"{layer}_ink_mask" if layer != "unknown_color" else "unknown_color_ink_mask"
+    semantic_mask_source = (
+        f"{layer}_ink_mask"
+        if layer != "unknown_color"
+        else "unknown_color_ink_mask"
+    )
+    mask_source = (
+        f"{layer}_continuity_mask"
+        if continuity_repair_used
+        else semantic_mask_source
+    )
 
-    record["original_crop_path"] = original_path
-    record["analysis_crop_path"] = analysis_path
-    record["classification_crop_path"] = classification_path
-    record["classification_crop_source"] = "analysis_crop_path"
+    record["full_text_crop_path"] = full_text_path
+    record["original_crop_path"] = None
+    record["analysis_crop_path"] = full_text_path
+    record["classification_crop_path"] = full_text_path
+    record["classification_crop_source"] = "full_text_crop_path"
     record["classification_crop_policy"] = "target_layer_only_on_white_background"
     record["classification_layer"] = layer
 
-    record["context_crop_path"] = context_path
+    record["context_crop_path"] = None
     record["analysis_mask_crop_path"] = analysis_mask_path
 
     # Backward compatibility for old downstream consumers.
-    record["refined_crop_path"] = analysis_path
+    record["refined_crop_path"] = full_text_path
 
     record["mask_source"] = mask_source
+    record["semantic_mask_source"] = semantic_mask_source
+    record["analysis_mask_policy"] = (
+        "cross_color_crossing_repaired_target_mask"
+        if continuity_repair_used
+        else "exact_exclusive_target_layer_mask"
+    )
     record["visual_layer_source"] = visual_layer_source
     record["final_bbox"] = safe_bbox
 
     record["refiner"]["status"] = "review"
     record["refiner"]["crop_views"] = {
-        "original": original_path,
-        "analysis": analysis_path,
-        "classification": classification_path,
-        "context": context_path,
+        "full_text": full_text_path,
         "analysis_mask": analysis_mask_path,
 
-        "analysis_masks_kept": mask_names["analysis"],
-        "context_masks_kept": mask_names["context"],
-
+        "analysis_visual_masks_kept": mask_names["analysis"],
+        "analysis_masks_kept": analysis_mask_names,
         "visual_rendering": "n00_exclusive_color_layer_artifacts",
         "classification_rendering": "target_layer_only_on_white_background",
-        "classification_crop_source": "analysis_crop_path",
+        "classification_crop_source": "full_text_crop_path",
         "analysis_mask_format": "binary_white_ink_on_black_background",
+        "analysis_mask_policy": record["analysis_mask_policy"],
     }
 
     return record
@@ -381,6 +390,7 @@ def load_crop_generation_assets(scribemap_result):
     """Load source image, layer masks, and visual layer artifacts for crop generation."""
     artifacts = scribemap_result.get("preparation_artifacts", {})
     layer_mask_paths = scribemap_result.get("layer_mask_paths", {})
+    continuity_mask_paths = scribemap_result.get("continuity_mask_paths", {})
 
     source_image_path = (
         artifacts.get("cropped")
@@ -402,6 +412,16 @@ def load_crop_generation_assets(scribemap_result):
 
         if os.path.exists(mask_path):
             masks_by_name[layer_name] = load_image(mask_path, color=False)
+
+    for layer_name, mask_path in continuity_mask_paths.items():
+        if mask_path is None:
+            continue
+
+        if os.path.exists(mask_path):
+            masks_by_name[f"{layer_name}_continuity"] = load_image(
+                mask_path,
+                color=False,
+            )
 
     layer_artifact_keys = {
         "blue": "blue_ink_layer",
@@ -501,6 +521,243 @@ def bbox_height(bbox):
 
 def bbox_area(bbox):
     return bbox_width(bbox) * bbox_height(bbox)
+
+
+def bbox_intersection(bbox_a, bbox_b):
+    """Return the rectangular intersection of two bboxes, or None."""
+    intersection = {
+        "x1": max(int(bbox_a["x1"]), int(bbox_b["x1"])),
+        "y1": max(int(bbox_a["y1"]), int(bbox_b["y1"])),
+        "x2": min(int(bbox_a["x2"]), int(bbox_b["x2"])),
+        "y2": min(int(bbox_a["y2"]), int(bbox_b["y2"])),
+    }
+
+    if (
+        intersection["x2"] <= intersection["x1"]
+        or intersection["y2"] <= intersection["y1"]
+    ):
+        return None
+
+    return intersection
+
+
+def bbox_distance(bbox_a, bbox_b):
+    """Return edge-to-edge Euclidean distance between two bboxes."""
+    horizontal_gap = max(
+        int(bbox_a["x1"]) - int(bbox_b["x2"]),
+        int(bbox_b["x1"]) - int(bbox_a["x2"]),
+        0,
+    )
+    vertical_gap = max(
+        int(bbox_a["y1"]) - int(bbox_b["y2"]),
+        int(bbox_b["y1"]) - int(bbox_a["y2"]),
+        0,
+    )
+    return float(np.hypot(horizontal_gap, vertical_gap))
+
+
+def get_red_crossing_evidence(blue_group, red_group, red_mask, settings):
+    """Measure whether accepted red ink credibly crosses one blue group.
+
+    Args:
+        blue_group: Normalized N01 blue source-group record.
+        red_group: Normalized N01 red source-group record.
+        red_mask: Full-document exclusive red mask.
+        settings: RefinerSettings instance.
+
+    Returns:
+        JSON-safe evidence dictionary when the crossing is credible, else None.
+    """
+    blue_bbox = blue_group["bbox"]
+    red_bbox = red_group["bbox"]
+    intersection = bbox_intersection(blue_bbox, red_bbox)
+
+    if intersection is None:
+        return None
+
+    mask_crop = red_mask[
+        intersection["y1"]:intersection["y2"],
+        intersection["x1"]:intersection["x2"],
+    ]
+    ink_y, ink_x = np.nonzero(mask_crop > 0)
+    ink_pixels = int(len(ink_x))
+
+    if ink_pixels < settings.correction_min_crossing_ink_pixels:
+        return None
+
+    global_x = ink_x + intersection["x1"]
+    global_y = ink_y + intersection["y1"]
+    horizontal_span = int(global_x.max() - global_x.min() + 1)
+    vertical_span = int(global_y.max() - global_y.min() + 1)
+    horizontal_ratio = horizontal_span / float(bbox_width(blue_bbox))
+    vertical_ratio = vertical_span / float(bbox_height(blue_bbox))
+
+    if (
+        horizontal_ratio < settings.correction_min_horizontal_span_ratio
+        and vertical_ratio < settings.correction_min_vertical_span_ratio
+    ):
+        return None
+
+    return {
+        "blue_source_group_id": blue_group["source_group_id"],
+        "red_source_group_id": red_group["source_group_id"],
+        "intersection_bbox": intersection,
+        "red_ink_pixels_inside_blue": ink_pixels,
+        "horizontal_span_px": horizontal_span,
+        "vertical_span_px": vertical_span,
+        "horizontal_span_ratio": round(horizontal_ratio, 4),
+        "vertical_span_ratio": round(vertical_ratio, 4),
+        "reason": "accepted_red_group_crosses_blue_text",
+    }
+
+
+def is_red_replacement_candidate(red_group, settings):
+    """Return whether a red group is large enough to contain correction text."""
+    width = int(red_group["width"])
+    height = int(red_group["height"])
+    area = int(red_group["area"])
+    aspect_ratio = max(width / float(height), height / float(width))
+
+    return (
+        width >= settings.correction_replacement_min_width_px
+        and height >= settings.correction_replacement_min_height_px
+        and area >= settings.correction_replacement_min_area
+        and aspect_ratio <= settings.correction_replacement_max_aspect_ratio
+    )
+
+
+def apply_red_correction_routing(source_groups, red_mask, settings):
+    """Pair crossed blue text with nearby red replacement-text candidates.
+
+    Blue text crossed by an accepted red group is preserved as evidence but is
+    removed from Minos/OCR routing. Nearby text-shaped red groups are promoted
+    directly to N05 without asking Minos to classify their known color role.
+
+    Args:
+        source_groups: Mutable normalized N01 source-group records.
+        red_mask: Full-document exclusive red mask.
+        settings: RefinerSettings instance.
+
+    Returns:
+        Summary dictionary describing suppressed blue and promoted red groups.
+    """
+    summary = {
+        "enabled": bool(settings.correction_routing_enabled),
+        "suppressed_blue_count": 0,
+        "promoted_red_count": 0,
+        "unpaired_deleted_blue_count": 0,
+        "relationships": [],
+    }
+
+    if not settings.correction_routing_enabled or red_mask is None:
+        return summary
+
+    blue_groups = [group for group in source_groups if group["layer"] == "blue"]
+    red_groups = [group for group in source_groups if group["layer"] == "red"]
+    promoted_red_ids = set()
+
+    for blue_group in blue_groups:
+        crossing_evidence = [
+            evidence
+            for red_group in red_groups
+            if (
+                evidence := get_red_crossing_evidence(
+                    blue_group=blue_group,
+                    red_group=red_group,
+                    red_mask=red_mask,
+                    settings=settings,
+                )
+            ) is not None
+        ]
+
+        if not crossing_evidence:
+            continue
+
+        crossing_red_ids = {
+            evidence["red_source_group_id"]
+            for evidence in crossing_evidence
+        }
+        replacement_candidates = []
+
+        for red_group in red_groups:
+            if not is_red_replacement_candidate(red_group, settings):
+                continue
+
+            distance = bbox_distance(blue_group["bbox"], red_group["bbox"])
+            if distance > settings.correction_replacement_max_distance_px:
+                continue
+
+            replacement_candidates.append(
+                (
+                    0 if red_group["source_group_id"] in crossing_red_ids else 1,
+                    round(distance, 4),
+                    -int(red_group["area"]),
+                    str(red_group["source_group_id"]),
+                    red_group,
+                )
+            )
+
+        replacement_candidates.sort(key=lambda item: item[:4])
+        selected_red_groups = [
+            item[4]
+            for item in replacement_candidates[
+                :settings.correction_max_replacements_per_blue
+            ]
+        ]
+        replacement_ids = [
+            group["source_group_id"]
+            for group in selected_red_groups
+        ]
+
+        blue_group.update({
+            "role_guess": "red_crossed_deleted_handwriting",
+            "recommended_next_node": "suppressed_replaced_text",
+            "minos_required": False,
+            "minos_mode": "skip_red_crossed_blue",
+            "is_final_text_candidate": False,
+            "preserve_as_evidence": True,
+            "correction_role": "deleted_original",
+            "force_handwritten_ocr": False,
+            "crossing_red_source_group_ids": sorted(crossing_red_ids),
+            "replacement_red_source_group_ids": replacement_ids,
+            "correction_evidence": crossing_evidence,
+        })
+
+        for red_group in selected_red_groups:
+            paired_blue_ids = red_group.setdefault(
+                "replaces_blue_source_group_ids",
+                [],
+            )
+            if blue_group["source_group_id"] not in paired_blue_ids:
+                paired_blue_ids.append(blue_group["source_group_id"])
+
+            red_group.update({
+                "layer_hypothesis": "red_handwritten_correction",
+                "role_guess": "replacement_handwriting",
+                "recommended_next_node": "N05_handwritten_ocr",
+                "minos_required": False,
+                "minos_mode": "skip_known_red_replacement",
+                "is_final_text_candidate": True,
+                "preserve_as_evidence": True,
+                "correction_role": "replacement_text",
+                "force_handwritten_ocr": True,
+            })
+            promoted_red_ids.add(red_group["source_group_id"])
+
+        summary["relationships"].append({
+            "deleted_blue_source_group_id": blue_group["source_group_id"],
+            "crossing_red_source_group_ids": sorted(crossing_red_ids),
+            "replacement_red_source_group_ids": replacement_ids,
+            "evidence": crossing_evidence,
+        })
+
+    summary["suppressed_blue_count"] = len(summary["relationships"])
+    summary["promoted_red_count"] = len(promoted_red_ids)
+    summary["unpaired_deleted_blue_count"] = sum(
+        not relationship["replacement_red_source_group_ids"]
+        for relationship in summary["relationships"]
+    )
+    return summary
 
 
 def pad_bbox(bbox, padding_px):
@@ -712,6 +969,21 @@ def build_refined_record(text_unit_id, source_group, settings):
         "minos_mode": source_group["minos_mode"],
         "is_final_text_candidate": source_group.get("is_final_text_candidate", True),
         "preserve_as_evidence": source_group.get("preserve_as_evidence", False),
+        "force_handwritten_ocr": source_group.get("force_handwritten_ocr", False),
+        "correction_role": source_group.get("correction_role"),
+        "crossing_red_source_group_ids": source_group.get(
+            "crossing_red_source_group_ids",
+            [],
+        ),
+        "replacement_red_source_group_ids": source_group.get(
+            "replacement_red_source_group_ids",
+            [],
+        ),
+        "replaces_blue_source_group_ids": source_group.get(
+            "replaces_blue_source_group_ids",
+            [],
+        ),
+        "correction_evidence": source_group.get("correction_evidence", []),
 
         "analysis_view": source_group["analysis_view"],
         "context_view": source_group["context_view"],
@@ -768,6 +1040,16 @@ class CropRefiner:
 
     def refine_document(self, classified_groups_json_path, output_path=None):
         payload = load_json(classified_groups_json_path)
+        source_image = None
+        masks_by_name = {}
+        layer_images_by_name = {}
+        correction_routing = {
+            "enabled": False,
+            "suppressed_blue_count": 0,
+            "promoted_red_count": 0,
+            "unpaired_deleted_blue_count": 0,
+            "relationships": [],
+        }
 
         if self.settings.input_mode == "scribemap_2_layers":
             scribemap_result = load_scribemap_result_from_payload(payload)
@@ -775,6 +1057,14 @@ class CropRefiner:
             source_groups = collect_layer_groups(
                 scribemap_result=scribemap_result,
                 layers_to_refine=self.settings.layers_to_refine,
+            )
+            source_image, masks_by_name, layer_images_by_name = (
+                load_crop_generation_assets(scribemap_result)
+            )
+            correction_routing = apply_red_correction_routing(
+                source_groups=source_groups,
+                red_mask=masks_by_name.get("red"),
+                settings=self.settings,
             )
         else:
             source_groups = []
@@ -796,10 +1086,10 @@ class CropRefiner:
             output_dir = os.getcwd()
 
         crops_output_dir = os.path.join(output_dir, "crops")
+        if os.path.isdir(crops_output_dir):
+            shutil.rmtree(crops_output_dir)
 
         if self.settings.input_mode == "scribemap_2_layers":
-            source_image, masks_by_name, layer_images_by_name = load_crop_generation_assets(scribemap_result)
-
             refined_groups = [
                 save_crop_views_for_record(
                     record=record,
@@ -819,11 +1109,18 @@ class CropRefiner:
             "source_group_count": len(source_groups),
             "source_groups": source_groups,
             "refined_groups": refined_groups,
+            "correction_routing": correction_routing,
             "crops_output_dir": crops_output_dir,
             "refined_crops_dir": crops_output_dir,
             "summary": {
                 "source_group_count": len(source_groups),
-                "group_count": len(refined_groups)
+                "group_count": len(refined_groups),
+                "suppressed_blue_count": correction_routing[
+                    "suppressed_blue_count"
+                ],
+                "promoted_red_count": correction_routing[
+                    "promoted_red_count"
+                ],
             }
         }
 
@@ -833,4 +1130,10 @@ class CropRefiner:
         return result
 
 
-__all__ = ["CropRefiner", "RefinerSettings", "coerce_settings", "load_refiner_settings"]
+__all__ = [
+    "CropRefiner",
+    "RefinerSettings",
+    "apply_red_correction_routing",
+    "coerce_settings",
+    "load_refiner_settings",
+]

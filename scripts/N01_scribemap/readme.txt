@@ -49,6 +49,11 @@ space and runs ScribeMap independently on these semantic masks:
 The legacy content_ink_mask run is retained for compatibility/debugging, but the
 active pipeline bridge uses flattened groups from the real color layers.
 
+N01 also carries N00 blue_continuity_mask and red_continuity_mask paths in
+continuity_mask_paths. These masks are not used to classify or group N01
+regions. They are forwarded so N02 can build topology-safe ScribeTrace crops
+without changing semantic color ownership.
+
 Layer Meaning
 -------------
 
@@ -64,8 +69,11 @@ Core Flow
 2. Detect connected components for each layer.
 3. Build candidate groups using ScribeMap geometry.
 4. Reject obvious artifacts.
-5. Save per-layer groups, crops, and previews.
+5. Save group metadata and document-level previews.
 6. Flatten active layer groups into the neutral N02 bridge contract.
+
+N01 no longer materializes legacy per-group JPEGs during normal pipeline runs.
+N02 owns the canonical full-text crop for every active color-layer group.
 
 Output Folder
 -------------
@@ -94,10 +102,10 @@ Current Four-Document Baseline
 ------------------------------
 After the June 2026 color tuning, current total active groups are approximately:
 
-    test_1: 98
-    test_2: 93
-    test_3: 78
-    test_4: 62
+    test_1: 102
+    test_2: 97
+    test_3: 76
+    test_4: 65
 
 These values are diagnostics, not permanent requirements.
 

@@ -1,7 +1,6 @@
 """Crop copying and Tesseract-preparation helpers for N04."""
 
 import os
-import shutil
 
 import cv2
 
@@ -9,9 +8,37 @@ from n04_constants import PRINTED_VISUAL_CLASSES
 from n04_io import check_file_exists
 from n04_routing import get_best_crop_path_for_printed_ocr, get_visual_class
 
+
+def normalize_dark_ink_on_white(image):
+    """Normalize grayscale evidence to dark foreground on a white background.
+
+    Args:
+        image: Grayscale crop that may use either binary polarity.
+
+    Returns:
+        Grayscale crop whose border/background is white.
+    """
+    if image.ndim != 2:
+        raise ValueError("Tesseract polarity normalization expects grayscale.")
+
+    border_pixels = cv2.hconcat(
+        [
+            image[0:1, :],
+            image[-1:, :],
+            image[:, 0:1].reshape(1, -1),
+            image[:, -1:].reshape(1, -1),
+        ]
+    )
+
+    if float(border_pixels.mean()) < 127.5:
+        return cv2.bitwise_not(image)
+
+    return image
+
+
 def copy_candidate_crop_to_n04(route_record, folders):
     """
-    Copy a selected printed candidate crop into the N04 debug crop folders.
+    Resolve the canonical N02 full-text crop selected for N04.
 
     N04 selected classes:
     - printed_only
@@ -22,7 +49,7 @@ def copy_candidate_crop_to_n04(route_record, folders):
         n04_printed_ocr/crops/mixed/...
 
     Returns:
-        copied crop path, or None if no usable crop path exists.
+        Existing crop path, or None if no usable crop path exists.
     """
     visual_class = get_visual_class(route_record)
 
@@ -39,14 +66,7 @@ def copy_candidate_crop_to_n04(route_record, folders):
         label="selected printed OCR crop"
     )
 
-    file_name = os.path.basename(crop_path)
-
-    target_folder = folders[visual_class]
-    target_path = f"{target_folder}/{file_name}"
-
-    shutil.copy2(crop_path, target_path)
-
-    return target_path
+    return os.path.abspath(crop_path)
 
 
 def prepare_crop_for_tesseract(image, scale=3, border=20):
@@ -61,8 +81,10 @@ def prepare_crop_for_tesseract(image, scale=3, border=20):
     This is useful because many N04 crops are tiny, and raw Tesseract
     performs poorly on small Armenian printed text.
     """
+    normalized = normalize_dark_ink_on_white(image)
+
     upscaled = cv2.resize(
-        image,
+        normalized,
         None,
         fx=scale,
         fy=scale,
@@ -85,6 +107,13 @@ def prepare_crop_for_tesseract(image, scale=3, border=20):
         255,
         cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
+
+    # The explicit white border is also a final polarity assertion. If a future
+    # preprocessing change reverses the image, restore Tesseract's preferred
+    # black-text-on-white convention here.
+    border_sample = thresholded[0, :]
+    if float(border_sample.mean()) < 127.5:
+        thresholded = cv2.bitwise_not(thresholded)
 
     return thresholded
 

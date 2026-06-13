@@ -70,7 +70,7 @@ class CharacterUnitProposerTests(unittest.TestCase):
             proposal["segmentation_hypotheses"][0]["segments"][0]["bbox"],
         )
 
-    def test_wide_mask_with_valley_produces_saved_two_segment_hypothesis(self):
+    def test_wide_mask_keeps_valley_hints_without_segment_artifacts(self):
         mask = np.zeros((24, 64), dtype=np.uint8)
         mask[4:20, 5:25] = 255
         mask[3:21, 39:59] = 255
@@ -84,19 +84,16 @@ class CharacterUnitProposerTests(unittest.TestCase):
             "wide_unit_possible_multi_letter",
             proposal["recovery_reasons"],
         )
-        split_hypotheses = proposal["segmentation_hypotheses"][1:]
-        self.assertGreaterEqual(len(split_hypotheses), 1)
-        self.assertLessEqual(len(split_hypotheses), 5)
-
-        first_split = split_hypotheses[0]
-        self.assertEqual("vertical_projection_split", first_split["type"])
-        self.assertEqual(2, len(first_split["segments"]))
-        self.assertLess(first_split["split_x"], 39)
-        self.assertGreater(first_split["split_x"], 25)
-
-        for segment in first_split["segments"]:
-            self.assertTrue(os.path.isfile(segment["mask_crop_path"]))
-            self.assertTrue(os.path.isfile(segment["visual_crop_path"]))
+        self.assertEqual(1, len(proposal["segmentation_hypotheses"]))
+        self.assertGreaterEqual(len(proposal["split_hints"]), 1)
+        self.assertLessEqual(len(proposal["split_hints"]), 5)
+        first_hint = proposal["split_hints"][0]
+        self.assertLess(first_hint["cut_x"], 39)
+        self.assertGreater(first_hint["cut_x"], 25)
+        self.assertFalse(proposal["split_artifacts_materialized"])
+        self.assertFalse(
+            os.path.exists(self.folders["character_unit_segments"])
+        )
 
     def test_border_contact_sets_recovery_reasons_without_rejecting_unit(self):
         mask = np.zeros((20, 20), dtype=np.uint8)
@@ -166,7 +163,8 @@ class CharacterUnitProposerTests(unittest.TestCase):
             "character_unit_proposal"
         ]
         self.assertEqual("completed", proposal["status"])
-        self.assertGreater(len(proposal["segmentation_hypotheses"]), 1)
+        self.assertEqual(1, len(proposal["segmentation_hypotheses"]))
+        self.assertGreater(len(proposal["split_hints"]), 0)
         self.assertTrue(os.path.isfile(result["metadata_path"]))
 
 

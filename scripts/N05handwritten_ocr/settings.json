@@ -1,5 +1,6 @@
 {
   "reset_output": true,
+  "copy_selected_crops": false,
   "experts": {
     "tesseract_ocr": {
       "enabled": false

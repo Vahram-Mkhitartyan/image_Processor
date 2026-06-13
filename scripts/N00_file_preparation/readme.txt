@@ -20,7 +20,6 @@ Active Pipeline Steps
     rotate_major
     convert_to_grayscale
     denoise_image
-    improve_contrast
     threshold_image
     deskew_image
     crop_white_margins
@@ -30,6 +29,8 @@ Active Pipeline Steps
 
 The color image is transformed with the same rotation, deskew, and crop bounds
 as the grayscale image so all later bounding boxes share one coordinate space.
+Adaptive thresholding uses a conservative C value of 14, slightly strengthening
+faint stroke coverage without reintroducing contrast-amplified paper noise.
 
 Main Files
 ----------
@@ -37,8 +38,8 @@ file_preparation.py:
     Pipeline state, step registry, settings, and orchestration.
 
 image_preprocessor.py:
-    Loading, rotation, grayscale conversion, denoising, contrast, thresholding,
-    deskewing, and white-margin cropping.
+    Loading, rotation, grayscale conversion, denoising, thresholding, deskewing,
+    and white-margin cropping.
 
 file_preparation_scribemap_masks.py:
     Form-line masks, content mask, exclusive color masks, dark-color recovery,
@@ -70,10 +71,9 @@ Important Full Images
 
     02_gray.jpeg
     03_denoised.jpeg
-    04_enhanced.jpeg
-    05_thresholded.jpeg
-    06_deskewed.jpeg
-    07_cropped.jpeg
+    04_thresholded.jpeg
+    05_deskewed.jpeg
+    06_cropped.jpeg
     08_red_ink_layer.jpeg
     09_blue_ink_layer.jpeg
     10_green_ink_layer.jpeg
@@ -97,6 +97,10 @@ Important Masks
     11_unknown_color_ink_mask.png
     12_colored_ink_mask.png
     13_black_ink_mask.png
+    14_blue_continuity_mask.png
+    15_red_continuity_mask.png
+    16_blue_borrowed_bridge_mask.png
+    17_red_borrowed_bridge_mask.png
 
 Color Segmentation
 ------------------
@@ -113,6 +117,23 @@ same-color source pixels only when they directly continue trusted red, blue, or
 green ink. Unlike ordinary dilation, this restores faded stroke width without
 growing into unrelated paper texture. Recovery counts are stored in metadata as
 seeded_red_edge_pixels, seeded_blue_edge_pixels, and seeded_green_edge_pixels.
+The active edge thresholds allow saturation down to 23, chroma down to 9,
+channel dominance down to 4, and value up to 240. Recovery still grows only one
+pixel from trusted seeds, and final red, blue, green, unknown, and black masks
+remain mutually exclusive.
+
+Cross-Color Continuity Repair
+-----------------------------
+The exclusive masks remain the semantic source of truth. At a real red/blue
+crossing, however, winner-take-all ownership can make the other stroke appear
+artificially broken. N00 therefore also creates separate continuity masks for
+topology consumers such as ScribeTrace.
+
+A foreign-color pixel is borrowed only when target-color ink exists on opposite
+sides along a horizontal, vertical, or diagonal axis within
+cross_color_bridge_radius_px (default 4). One-sided contacts and parallel nearby
+marks are not borrowed. The debug bridge masks contain only the borrowed pixels.
+Continuity masks may overlap at supported crossings; semantic masks never do.
 
 Key returned artifacts include:
 
@@ -123,6 +144,8 @@ Key returned artifacts include:
     state["artifacts"]["green_ink_mask"]
     state["artifacts"]["unknown_color_ink_mask"]
     state["artifacts"]["black_ink_mask"]
+    state["artifacts"]["blue_continuity_mask"]
+    state["artifacts"]["red_continuity_mask"]
 
 When To Edit N00
 ----------------

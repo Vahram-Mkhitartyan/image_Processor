@@ -3,10 +3,11 @@ Node N05: Handwriting Mixture Of Experts
 
 Purpose
 -------
-N05 consumes N03 routes classified as handwriting_only or mixed, prepares a
-coordinate-aware handwriting map, and orchestrates four independent recognition
-experts. The experts will eventually produce competing evidence for a learned
-consensus model.
+N05 consumes N03 routes classified as handwriting_only or mixed, plus explicit
+force_handwritten_ocr red replacement routes from N02 correction pairing. It
+prepares a coordinate-aware handwriting map and orchestrates four independent
+recognition experts. The experts will eventually produce competing evidence for
+a learned consensus model.
 
 Before any expert runs, v0.3.1 also builds deterministic character-unit
 segmentation hypotheses. This proposal layer is shared by every expert and does
@@ -74,16 +75,20 @@ inventing OCR output.
 Current Flow
 ------------
 1. Load N03 visual-route metadata.
-2. Select handwriting_only and mixed routes.
-3. Copy the best available crop into N05.
+2. Select handwriting_only, mixed, and forced red-replacement routes.
+3. Reference the canonical N02 full-text crop without copying it.
 4. Preserve coordinates, crop lineage, masks, and routing evidence.
 5. Always create a whole-unit character hypothesis.
 6. Measure mask geometry, borders, connected components, and vertical
    projection valleys.
-7. Add recovery flags and up to five conservative two-segment hypotheses.
+7. Add recovery flags and up to five JSON-only projection-valley split hints.
 8. Build the four-expert registry from settings.json.
 9. Keep existing experts on the original whole-unit crop for now.
 10. Save every proposal inside the handwriting text map.
+
+The universal proposer no longer writes segment images. Each recognition expert
+will own its eventual segmentation strategy. copy_selected_crops can be enabled
+for an intentional export, but defaults to false.
 
 Character Unit Proposer
 -----------------------

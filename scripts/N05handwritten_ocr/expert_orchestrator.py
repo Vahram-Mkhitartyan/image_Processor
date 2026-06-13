@@ -114,7 +114,12 @@ def create_output_folders(output_dir):
             "segments",
         ),
     }
-    ensure_dir(*folders.values())
+    ensure_dir(
+        folders["root"],
+        folders["metadata"],
+        folders["scribetrace"],
+        folders["scribetrace_debug"],
+    )
     return folders
 
 
@@ -145,7 +150,10 @@ def get_visual_class(route_record):
 
 def should_send_to_handwritten_ocr(route_record):
     """Return whether an N03 route belongs in N05."""
-    return get_visual_class(route_record) in HANDWRITING_VISUAL_CLASSES
+    return (
+        route_record.get("force_handwritten_ocr") is True
+        or get_visual_class(route_record) in HANDWRITING_VISUAL_CLASSES
+    )
 
 
 def select_handwriting_candidates(route_records):
@@ -218,14 +226,18 @@ def get_best_crop_path(route_record):
     return get_best_crop_path_with_source(route_record)[0]
 
 
-def copy_candidate_crop(route_record, folders):
-    """Copy one selected N03 handwriting crop into its N05 class folder."""
+def copy_candidate_crop(route_record, folders, save_copy=False):
+    """Select one N03 crop and optionally materialize an N05 debug copy."""
     crop_path, crop_source = get_best_crop_path_with_source(route_record)
     if crop_path is None:
         return None, None, None
 
+    if not save_copy:
+        return None, crop_path, crop_source
+
     visual_class = get_visual_class(route_record)
     target_folder = folders.get(visual_class, folders["fallback_from_printed_only"])
+    ensure_dir(target_folder)
     target_path = os.path.join(target_folder, os.path.basename(crop_path))
     shutil.copy2(crop_path, target_path)
     return os.path.abspath(target_path), crop_path, crop_source
@@ -349,6 +361,16 @@ def build_handwritten_text_unit(
             True,
         ),
         "preserve_as_evidence": route_record.get("preserve_as_evidence", False),
+        "force_handwritten_ocr": route_record.get(
+            "force_handwritten_ocr",
+            False,
+        ),
+        "correction_role": route_record.get("correction_role"),
+        "replaces_blue_source_group_ids": route_record.get(
+            "replaces_blue_source_group_ids",
+            [],
+        ),
+        "correction_evidence": route_record.get("correction_evidence", []),
         "handwriting_profile": build_default_handwriting_profile(),
         "engine_routing": build_default_engine_routing(),
         "edge_cases": build_default_edge_cases(),
@@ -485,6 +507,15 @@ def summarize_handwritten_text_map(
             )
             for unit in handwritten_text_units
         ),
+        "character_unit_split_hint_count": sum(
+            len(
+                unit.get("character_unit_proposal", {}).get(
+                    "split_hints",
+                    [],
+                )
+            )
+            for unit in handwritten_text_units
+        ),
     }
 
 
@@ -498,6 +529,7 @@ def print_summary(document_id, summary, metadata_path):
     print("Handwritten text units:", summary["handwritten_text_units_count"])
     print("Recovery flagged:", summary["character_unit_recovery_count"])
     print("Split hypotheses:", summary["character_unit_split_hypothesis_count"])
+    print("Non-materialized split hints:", summary["character_unit_split_hint_count"])
     print("Skipped:", summary["skipped_count"])
     print("Failed:", summary["failed_count"])
     print("Metadata:", metadata_path)
@@ -527,9 +559,13 @@ def build_handwriting_expert_map(
     for route_record in selected_routes:
         try:
             copied_crop_path, selected_crop_path, selected_crop_source = (
-                copy_candidate_crop(route_record, folders)
+                copy_candidate_crop(
+                    route_record,
+                    folders,
+                    save_copy=settings.get("copy_selected_crops", False),
+                )
             )
-            if copied_crop_path is None:
+            if selected_crop_path is None:
                 skipped_records.append(
                     {
                         "document_id": document_id,

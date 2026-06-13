@@ -60,11 +60,24 @@ N03 selects the first existing crop in this order:
 
 The binary analysis_mask_crop_path is never used by Minos.
 
+By default N03 does not copy crops into classified class folders. routed_crop_path
+references the existing N02 full-text crop. Set save_classified_copies=true only
+for an intentional review/export run.
+
 N02 Policy Handling
 -------------------
 Groups with minos_required=false are intentionally skipped. Current red
 correction/markup records use this path. Rejected records are skipped unless
 include_rejected is enabled. Missing crop paths are also recorded as skips.
+
+One explicit bypass exists for N02 correction pairing:
+
+    force_handwritten_ocr=true
+
+These known red replacement-text records do not run Minos. N03 emits them into
+the normal routes contract as handwriting_only with routing_method set to
+n02_red_correction_pairing. Crossed blue originals remain in skipped metadata
+as suppressed_replaced_text evidence.
 
 Settings
 --------
@@ -75,6 +88,7 @@ visual_classification_settings.json controls:
     noise_threshold
     mixed_handwriting_safety_threshold
     include_rejected
+    save_classified_copies
     reset_output
 
 handwriting_threshold is the canonical key. The accidental legacy spelling
@@ -88,11 +102,7 @@ Output Folder
 -------------
 
     temp_processing/<document_id>/n03_visual_classification/
-        classified/mixed/
-        classified/printed_only/
-        classified/handwriting_only/
-        classified/empty_or_noise/
-        classified/review/
+        classified/              empty unless copies are explicitly enabled
         metadata/<document_id>_n03_visual_classification_routes.json
         debug/
 

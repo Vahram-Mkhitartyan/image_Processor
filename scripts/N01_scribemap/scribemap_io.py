@@ -37,8 +37,6 @@ def ensure_output_folders(output_dir):
     metadata_dir = f"{output_dir}/metadata"
 
     os.makedirs(debug_dir, exist_ok=True)
-    os.makedirs(components_dir, exist_ok=True)
-    os.makedirs(groups_dir, exist_ok=True)
     os.makedirs(metadata_dir, exist_ok=True)
 
     return {

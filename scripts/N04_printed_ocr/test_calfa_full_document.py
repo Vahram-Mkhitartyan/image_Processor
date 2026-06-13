@@ -8,9 +8,8 @@ import os
 import subprocess
 from datetime import datetime, timezone
 
-
 BASE_DIR = "/home/vahram/Desktop/image_Processor"
-DEFAULT_IMAGE_PATH = os.path.join(BASE_DIR, "handwritten_text", "test_1.png")
+DEFAULT_IMAGE_PATH = os.path.join(BASE_DIR, "temp_processing", "test_1", "n00_file_preparation", "full_images", "03_denoised.jpeg")
 DEFAULT_OUTPUT_DIR = os.path.join(
     BASE_DIR,
     "temp_processing",

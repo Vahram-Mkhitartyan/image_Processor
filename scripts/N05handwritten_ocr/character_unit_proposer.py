@@ -338,7 +338,7 @@ def _save_split_segments(
 
 def propose_character_units(handwritten_text_unit, folders):
     """
-    Propose whole-unit and conservative two-segment character hypotheses.
+    Describe one whole text unit and retain non-materialized split hints.
 
     Args:
         handwritten_text_unit: One coordinate-aware N05 text-unit record.
@@ -351,8 +351,8 @@ def propose_character_units(handwritten_text_unit, folders):
     source_crop_path = _first_existing_path(
         handwritten_text_unit,
         (
-            "n05_copied_crop_path",
             "n05_selected_crop_path",
+            "n05_copied_crop_path",
             "classification_crop_path",
             "routed_crop_path",
             "analysis_crop_path",
@@ -366,7 +366,6 @@ def propose_character_units(handwritten_text_unit, folders):
         handwritten_text_unit,
         ("analysis_mask_crop_path", "scribetrace_mask_crop_path"),
     )
-    _, segments_dir = _resolve_output_dir(folders)
     visual = _load_visual(source_crop_path)
     mask, mask_source = _load_proposal_mask(source_mask_path, visual)
 
@@ -407,30 +406,11 @@ def propose_character_units(handwritten_text_unit, folders):
         }
     ]
 
+    split_hints = []
     if _should_propose_splits(diagnostics):
-        valley_candidates = _projection_valley_candidates(
+        split_hints = _projection_valley_candidates(
             diagnostics["vertical_projection_profile"]
         )
-        for hypothesis_index, candidate in enumerate(valley_candidates, start=1):
-            hypothesis_id, segments = _save_split_segments(
-                unit_id=unit_id,
-                hypothesis_index=hypothesis_index,
-                cut_x=candidate["cut_x"],
-                mask=mask,
-                visual=visual,
-                segments_dir=segments_dir,
-            )
-            hypotheses.append(
-                {
-                    "hypothesis_id": hypothesis_id,
-                    "type": "vertical_projection_split",
-                    "segments": segments,
-                    "score_hint": round(candidate["score"], 6),
-                    "reason": "vertical_projection_valley",
-                    "split_x": candidate["cut_x"],
-                    "projection_value": candidate["projection_value"],
-                }
-            )
 
     return {
         "unit_id": unit_id,
@@ -442,6 +422,8 @@ def propose_character_units(handwritten_text_unit, folders):
         "recovery_reasons": recovery_reasons,
         "diagnostics": diagnostics,
         "segmentation_hypotheses": hypotheses,
+        "split_hints": split_hints,
+        "split_artifacts_materialized": False,
         "error": None,
     }
 

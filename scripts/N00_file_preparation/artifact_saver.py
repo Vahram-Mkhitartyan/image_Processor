@@ -104,6 +104,21 @@ class ArtifactSaver:
 
         state["artifacts"]["folders"] = folders
 
+        # Remove files from the retired enhancement-era sequence so repeated
+        # prep runs cannot expose stale stages in metadata or the UI.
+        for retired_name in (
+            "04_enhanced.jpeg",
+            "05_thresholded.jpeg",
+            "06_deskewed.jpeg",
+            "07_cropped.jpeg",
+        ):
+            retired_path = os.path.join(
+                folders["full_images_dir"],
+                retired_name,
+            )
+            if os.path.isfile(retired_path):
+                os.remove(retired_path)
+
         if "gray" in state["images"]:
             state["artifacts"]["gray"] = self.save_stage(
                 state["images"]["gray"],
@@ -118,31 +133,24 @@ class ArtifactSaver:
                 folders["full_images_dir"]
             )
 
-        if "enhanced" in state["images"]:
-            state["artifacts"]["enhanced"] = self.save_stage(
-                state["images"]["enhanced"],
-                "04_enhanced",
-                folders["full_images_dir"]
-            )
-
         if "thresholded" in state["images"]:
             state["artifacts"]["thresholded"] = self.save_stage(
                 state["images"]["thresholded"],
-                "05_thresholded",
+                "04_thresholded",
                 folders["full_images_dir"]
             )
 
         if "deskewed" in state["images"]:
             state["artifacts"]["deskewed"] = self.save_stage(
                 state["images"]["deskewed"],
-                "06_deskewed",
+                "05_deskewed",
                 folders["full_images_dir"]
             )
 
         if "cropped" in state["images"]:
             state["artifacts"]["cropped"] = self.save_stage(
                 state["images"]["cropped"],
-                "07_cropped",
+                "06_cropped",
                 folders["full_images_dir"]
             )
 
@@ -269,6 +277,34 @@ class ArtifactSaver:
             state["artifacts"]["black_ink_mask"] = self.save_mask_stage(
                 state["images"]["black_ink_mask"],
                 "13_black_ink_mask",
+                folders["masks_dir"]
+            )
+
+        if "blue_continuity_mask" in state["images"]:
+            state["artifacts"]["blue_continuity_mask"] = self.save_mask_stage(
+                state["images"]["blue_continuity_mask"],
+                "14_blue_continuity_mask",
+                folders["masks_dir"]
+            )
+
+        if "red_continuity_mask" in state["images"]:
+            state["artifacts"]["red_continuity_mask"] = self.save_mask_stage(
+                state["images"]["red_continuity_mask"],
+                "15_red_continuity_mask",
+                folders["masks_dir"]
+            )
+
+        if "blue_borrowed_bridge_mask" in state["images"]:
+            state["artifacts"]["blue_borrowed_bridge_mask"] = self.save_mask_stage(
+                state["images"]["blue_borrowed_bridge_mask"],
+                "16_blue_borrowed_bridge_mask",
+                folders["masks_dir"]
+            )
+
+        if "red_borrowed_bridge_mask" in state["images"]:
+            state["artifacts"]["red_borrowed_bridge_mask"] = self.save_mask_stage(
+                state["images"]["red_borrowed_bridge_mask"],
+                "17_red_borrowed_bridge_mask",
                 folders["masks_dir"]
             )
 
