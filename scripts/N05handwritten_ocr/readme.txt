@@ -179,4 +179,6 @@ Standalone and integrated ScribeTrace debug files are owned by N05:
     n05_handwritten_ocr/scribetrace/debug/
 
 ScribeTrace remains disabled in integrated settings until its recognition layer
-is ready. Its standalone geometric/vector engine and tests remain active.
+is ready. ScribeTrace 4.0 theoretical reconstruction is separately disabled,
+so enabling the geometric expert does not automatically enable speculative
+repair. Its standalone geometric/vector and reconstruction tests remain active.

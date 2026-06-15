@@ -82,7 +82,7 @@ plus a JSON report containing word boxes and confidence statistics.
 
 Run the default test_1 probe:
 
-    .venv/bin/python scripts/N04_printed_ocr/test_calfa_full_document.py
+    .venv/bin/python tests/N04_printed_ocr/test_calfa_full_document.py
 
 This is a local Tesseract baseline only. It is not equivalent to Calfa's online
 document-layout and AI service.

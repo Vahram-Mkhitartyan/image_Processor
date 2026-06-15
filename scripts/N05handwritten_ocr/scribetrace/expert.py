@@ -10,6 +10,9 @@ if __package__ in {None, ""}:
 import json
 import os
 
+import cv2
+import numpy as np
+
 from .trace_common import (
     EXPERT_NAME,
     NEIGHBOR_OFFSETS,
@@ -42,6 +45,7 @@ from .trace_paths import PathSignal, TraceLandmarkExtractor, TracePathExtractor
 from .trace_settings import TraceSettings, normalize_trace_settings
 from .trace_skeleton import SkeletonGraph, SkeletonPointExtractor, TraceSkeletonizer
 from .trace_repair import TraceMaskRepairer
+from .trace_reconstruction import TheoreticalReconstructor
 
 # Compatibility aliases retained for callers that imported private helpers.
 _coordinate_key = coordinate_key
@@ -188,9 +192,19 @@ def run_scribetrace(trace_input, settings=None):
         binary_mask, provenance = TraceMaskAdapter(trace_settings).resolve_trace_mask(
             trace_input
         )
-        repaired_mask, repair_metrics = TraceMaskRepairer(trace_settings).repair(
-            binary_mask
-        )
+        if trace_settings.enable_theoretical_reconstruction:
+            repaired_mask = np.where(binary_mask > 128, 255, 0).astype(np.uint8)
+            repair_metrics = {
+                "enabled": False,
+                "method": "delegated_to_theoretical_reconstruction",
+                "original_ink_pixels": int(cv2.countNonZero(repaired_mask)),
+                "repaired_ink_pixels": int(cv2.countNonZero(repaired_mask)),
+                "added_pixels": 0,
+            }
+        else:
+            repaired_mask, repair_metrics = TraceMaskRepairer(
+                trace_settings
+            ).repair(binary_mask)
 
         component_analysis = InkComponentExtractor(trace_settings).analyze_mask(
             repaired_mask
@@ -332,19 +346,40 @@ def run_scribetrace(trace_input, settings=None):
             )
             debug_paths.update(planned_debug_paths)
 
-        return _finalize_trace_result(
-            TraceResult(
-                status="completed",
-                trace_input=trace_input,
-                settings=trace_settings,
-                components=components,
-                trace_paths=trace_paths,
-                debug_paths=debug_paths,
-                metrics=metrics,
-                landmarks=landmarks,
-                feature_vector=feature_vector,
-                ink_holes=ink_holes,
+        trace_result = TraceResult(
+            status="completed",
+            trace_input=trace_input,
+            settings=trace_settings,
+            components=components,
+            trace_paths=trace_paths,
+            debug_paths=debug_paths,
+            metrics=metrics,
+            landmarks=landmarks,
+            feature_vector=feature_vector,
+            ink_holes=ink_holes,
+        )
+        trace_result.reconstruction = TheoreticalReconstructor(
+            trace_settings
+        ).run(
+            mask=component_analysis["cleaned_mask"],
+            original_result=trace_result,
+            output_dir=output_dir,
+            stable_unit_id=trace_input.stable_unit_id(),
+        )
+        metrics["reconstruction"] = {
+            "enabled": trace_result.reconstruction.get("enabled", False),
+            "status": trace_result.reconstruction.get("status"),
+            "candidate_count": trace_result.reconstruction.get(
+                "candidate_count",
+                0,
             ),
+            "accepted_count": trace_result.reconstruction.get(
+                "accepted_count",
+                0,
+            ),
+        }
+        return _finalize_trace_result(
+            trace_result,
             output_dir,
             trace_input.stable_unit_id(),
         )
@@ -383,6 +418,7 @@ __all__ = [
     "TraceResult",
     "TraceSettings",
     "TraceSkeletonizer",
+    "TheoreticalReconstructor",
     "get_expert_manifest",
     "load_rf_model",
     "match_ink_holes_to_closed_paths",

@@ -10,6 +10,7 @@ import sys
 BASE_DIR = "/home/vahram/Desktop/image_Processor"
 
 SCRIPTS_DIR = f"{BASE_DIR}/scripts"
+TESTS_DIR = f"{BASE_DIR}/tests"
 
 TRAIN_SCRIPT = f"{SCRIPTS_DIR}/Cyber_Lin_Kuei_Assembly/train_minos_classifier.py"
 BATCH_SCRIPT = f"{SCRIPTS_DIR}/pipeline_control/batch_processor.py"
@@ -162,6 +163,22 @@ def iter_active_python_files():
             if directory not in {"__pycache__", "legacy"}
         ]
 
+        for file_name in sorted(files):
+            if file_name.endswith(".py"):
+                yield os.path.join(root, file_name)
+
+
+def iter_test_python_files():
+    """Yield Python files from the centralized test suite."""
+    if not os.path.isdir(TESTS_DIR):
+        return
+
+    for root, dirs, files in os.walk(TESTS_DIR):
+        dirs[:] = [
+            directory
+            for directory in dirs
+            if directory != "__pycache__"
+        ]
         for file_name in sorted(files):
             if file_name.endswith(".py"):
                 yield os.path.join(root, file_name)
@@ -513,6 +530,29 @@ def run_project_doctor():
             f"{len(python_files)} active files",
         )
 
+    test_python_files = list(iter_test_python_files())
+    test_syntax_failures = []
+    for python_path in test_python_files:
+        try:
+            with open(python_path, "r", encoding="utf-8") as file:
+                source = file.read()
+            compile(source, python_path, "exec")
+        except Exception as error:
+            test_syntax_failures.append(
+                f"{os.path.relpath(python_path, BASE_DIR)}: {error}"
+            )
+
+    if test_syntax_failures:
+        for failure in test_syntax_failures:
+            add_doctor_result(results, "FAIL", "Test syntax", failure)
+    else:
+        add_doctor_result(
+            results,
+            "PASS",
+            "Test syntax",
+            f"{len(test_python_files)} files",
+        )
+
     settings_files = []
     for root, dirs, files in os.walk(SCRIPTS_DIR):
         dirs[:] = [
@@ -654,7 +694,7 @@ def count_text_file_lines(file_path):
 
 
 def collect_project_line_counts():
-    """Collect active, legacy, documentation, and configuration line totals.
+    """Collect production, test, legacy, documentation, and config totals.
 
     Args:
         None.
@@ -664,6 +704,7 @@ def collect_project_line_counts():
     """
     counts = {
         "active_python": {"lines": 0, "files": 0},
+        "test_python": {"lines": 0, "files": 0},
         "legacy_python": {"lines": 0, "files": 0},
         "documentation": {"lines": 0, "files": 0},
         "configuration": {"lines": 0, "files": 0},
@@ -695,6 +736,27 @@ def collect_project_line_counts():
 
             counts[category]["lines"] += count_text_file_lines(file_path)
             counts[category]["files"] += 1
+
+    if os.path.isdir(TESTS_DIR):
+        for root, dirs, files in os.walk(TESTS_DIR):
+            dirs[:] = [
+                directory
+                for directory in dirs
+                if directory not in LINE_COUNT_EXCLUDED_DIRS
+            ]
+            for file_name in files:
+                file_path = os.path.join(root, file_name)
+                extension = os.path.splitext(file_name)[1].lower()
+                if extension == ".py":
+                    category = "test_python"
+                elif extension in {".md", ".txt"}:
+                    category = "documentation"
+                elif extension == ".json":
+                    category = "configuration"
+                else:
+                    continue
+                counts[category]["lines"] += count_text_file_lines(file_path)
+                counts[category]["files"] += 1
 
     # Include project-level documentation without scanning datasets or outputs.
     for file_name in os.listdir(BASE_DIR):
@@ -732,13 +794,15 @@ def show_project_line_counts():
     counts = collect_project_line_counts()
 
     active = counts["active_python"]
+    tests = counts["test_python"]
     legacy = counts["legacy_python"]
     documentation = counts["documentation"]
     configuration = counts["configuration"]
 
     all_python_lines = active["lines"] + legacy["lines"]
+    all_python_with_tests = all_python_lines + tests["lines"]
     grand_total = (
-        all_python_lines
+        all_python_with_tests
         + documentation["lines"]
         + configuration["lines"]
     )
@@ -749,6 +813,11 @@ def show_project_line_counts():
         "Active Python:",
         format_sacred_count(active["lines"]),
         f"across {active['files']} files",
+    )
+    print(
+        "Tests:",
+        format_sacred_count(tests["lines"]),
+        f"across {tests['files']} files",
     )
     print(
         "Legacy Python:",
@@ -767,6 +836,10 @@ def show_project_line_counts():
     )
     print("-------------------------")
     print("Active + legacy code:", format_sacred_count(all_python_lines))
+    print(
+        "All Python including tests:",
+        format_sacred_count(all_python_with_tests),
+    )
     print("Everything included:", format_sacred_count(grand_total))
 
 

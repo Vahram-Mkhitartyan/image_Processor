@@ -28,7 +28,7 @@ scribetrace_random_forest_settings.json:
     Owns dataset/module routing, ScribeTrace extraction controls, split ratios,
     output folders, and Random Forest hyperparameters.
 
-scribemap_v1_classifier_test.py:
+tests/Cyber_Lin_Kuei_Assembly/scribemap_v1_classifier_test.py:
     Preserved old ScribeMap/classifier experiment. It is not part of the active
     runtime pipeline.
 
@@ -119,3 +119,58 @@ Inference should compare exact ordered feature_names against the model schema
 before calling predict_proba().
 
 The folder name is ridiculous in the correct way. Keep it.
+
+Aristotel
+---------
+Aristotel is the deterministic degradation teacher under `Aristotel/`.
+Its default `stream` mode generates training damage in RAM and stores no
+multiplied image dataset. See `Aristotel/readme.txt` for storage modes.
+
+ScribeTrace Random Forest v4.0
+------------------------------
+The v4 training settings connect clean Matenadata glyphs to Aristotel's
+deterministic in-memory degradation and then extract ScribeTrace geometry.
+Generated images are temporary; the retained dataset is compressed JSONL.
+
+Settings:
+
+    scripts/Cyber_Lin_Kuei_Assembly/
+        scribetrace_random_forest_v4_settings.json
+
+Small end-to-end validation:
+
+    .venv/bin/python -u \
+        scripts/Cyber_Lin_Kuei_Assembly/scribetrace_random_forest.py \
+        --settings scripts/Cyber_Lin_Kuei_Assembly/\
+scribetrace_random_forest_v4_settings.json \
+        --mode export-train \
+        --limit-per-class 10
+
+Full export and training:
+
+    .venv/bin/python -u \
+        scripts/Cyber_Lin_Kuei_Assembly/scribetrace_random_forest.py \
+        --settings scripts/Cyber_Lin_Kuei_Assembly/\
+scribetrace_random_forest_v4_settings.json \
+        --mode export-train \
+        --limit-per-class -1
+
+Every clean glyph and all Aristotel variants derived from it share source_id.
+Splitting happens by source_id inside each class, so related variants cannot
+leak between train, validation, and test. Reports include separate clean and
+degraded metrics.
+
+The v4 exporter also creates a compact recovery JSONL containing damage,
+quality, and expected-recovery labels. This is the contract for the later
+reconstruction gate. Actual reconstruction-benefit labels should be generated
+after the v4 recognizer exists and can compare original versus reconstructed
+confidence honestly.
+
+Runtime activation is explicit through:
+
+    models/scribetrace_active_model.json
+
+It remains pinned to v0.2.1 after training. Change `model_name` to
+`scribetrace_random_forest_v4_0` only after reviewing the full clean and
+degraded benchmark reports. If the selected installation is incomplete,
+runtime safely falls back to the proven model.

@@ -400,6 +400,7 @@ class TraceResult:
         feature_vector=None,
         result_json_path=None,
         ink_holes=None,
+        reconstruction=None,
     ):
         self.expert_name = expert_name
         self.status = status
@@ -415,6 +416,7 @@ class TraceResult:
         self.feature_vector = feature_vector
         self.result_json_path = result_json_path
         self.ink_holes = ink_holes or []
+        self.reconstruction = reconstruction
 
     def component_count(self):
         return len(self.components)
@@ -431,6 +433,10 @@ class TraceResult:
             "has_skeleton": self.metrics.get("skeleton_point_count", 0) > 0,
             "has_paths": len(self.trace_paths) > 0,
             "has_ink_holes": len(self.ink_holes) > 0,
+            "has_accepted_reconstruction": bool(
+                self.reconstruction
+                and self.reconstruction.get("accepted_hypothesis_ids")
+            ),
         }
 
         return {
@@ -468,6 +474,7 @@ class TraceResult:
             "ml_features": self.ml_features_dict(),
             "ink_hole_count": len(self.ink_holes),
             "ink_holes": [hole.to_dict() for hole in self.ink_holes],
+            "reconstruction": self.reconstruction,
         }
 
     def to_debug_dict(self, include_points=False):
@@ -516,4 +523,3 @@ class TraceFeatureVector:
             "sequence": self.sequence,
             "sequence_string": self.sequence_string,
         }
-

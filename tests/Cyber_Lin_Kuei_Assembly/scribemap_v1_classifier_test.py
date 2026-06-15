@@ -6,8 +6,10 @@ import cv2
 import numpy as np
 import tensorflow as tf
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SCRIPTS_DIR = os.path.dirname(SCRIPT_DIR)
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
 FILE_PREPARATION_DIR = f"{SCRIPTS_DIR}/N00_file_preparation"
 SCRIBEMAP_DIR = f"{SCRIPTS_DIR}/N01_scribemap"
 

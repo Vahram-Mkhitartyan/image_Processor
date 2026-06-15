@@ -9,7 +9,8 @@ import cv2
 import numpy as np
 
 
-NODE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+NODE_DIR = os.path.join(PROJECT_ROOT, "scripts", "N00_file_preparation")
 if NODE_DIR not in sys.path:
     sys.path.insert(0, NODE_DIR)
 

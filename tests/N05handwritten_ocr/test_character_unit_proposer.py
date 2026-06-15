@@ -8,8 +8,12 @@ import unittest
 import cv2
 import numpy as np
 
-from .character_unit_proposer import propose_character_units
-from .expert_orchestrator import build_handwriting_expert_map
+from scripts.N05handwritten_ocr.character_unit_proposer import (
+    propose_character_units,
+)
+from scripts.N05handwritten_ocr.expert_orchestrator import (
+    build_handwriting_expert_map,
+)
 
 
 class CharacterUnitProposerTests(unittest.TestCase):

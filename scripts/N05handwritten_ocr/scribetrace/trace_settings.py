@@ -22,7 +22,21 @@ class TraceSettings:
         short_path_merge_min_advantage_degrees=10.0,
         local_extrema_min_prominence=2,
         local_extrema_min_spacing=3,
-        
+        enable_theoretical_reconstruction=False,
+        reconstruction_max_hypotheses=5,
+        reconstruction_max_accepted=3,
+        reconstruction_max_bridge_length_px=12.0,
+        reconstruction_max_bridge_angle_degrees=45.0,
+        reconstruction_tangent_points=4,
+        reconstruction_min_endpoint_separation_px=2.0,
+        reconstruction_min_topology_gain=0.08,
+        reconstruction_min_acceptance_score=0.58,
+        reconstruction_max_added_ink_ratio=0.12,
+        reconstruction_confidence_weight=0.20,
+        reconstruction_topology_weight=0.55,
+        reconstruction_geometry_weight=0.25,
+        reconstruction_use_recognition_verification=True,
+        reconstruction_min_confidence_gain=0.0,
     ):
         self.enabled = bool(enabled)
         self.save_debug = bool(save_debug)
@@ -45,6 +59,49 @@ class TraceSettings:
         )
         self.local_extrema_min_prominence = int(local_extrema_min_prominence)
         self.local_extrema_min_spacing = int(local_extrema_min_spacing)
+        self.enable_theoretical_reconstruction = bool(
+            enable_theoretical_reconstruction
+        )
+        self.reconstruction_max_hypotheses = int(
+            reconstruction_max_hypotheses
+        )
+        self.reconstruction_max_accepted = int(reconstruction_max_accepted)
+        self.reconstruction_max_bridge_length_px = float(
+            reconstruction_max_bridge_length_px
+        )
+        self.reconstruction_max_bridge_angle_degrees = float(
+            reconstruction_max_bridge_angle_degrees
+        )
+        self.reconstruction_tangent_points = int(
+            reconstruction_tangent_points
+        )
+        self.reconstruction_min_endpoint_separation_px = float(
+            reconstruction_min_endpoint_separation_px
+        )
+        self.reconstruction_min_topology_gain = float(
+            reconstruction_min_topology_gain
+        )
+        self.reconstruction_min_acceptance_score = float(
+            reconstruction_min_acceptance_score
+        )
+        self.reconstruction_max_added_ink_ratio = float(
+            reconstruction_max_added_ink_ratio
+        )
+        self.reconstruction_confidence_weight = float(
+            reconstruction_confidence_weight
+        )
+        self.reconstruction_topology_weight = float(
+            reconstruction_topology_weight
+        )
+        self.reconstruction_geometry_weight = float(
+            reconstruction_geometry_weight
+        )
+        self.reconstruction_use_recognition_verification = bool(
+            reconstruction_use_recognition_verification
+        )
+        self.reconstruction_min_confidence_gain = float(
+            reconstruction_min_confidence_gain
+        )
 
         self.validate()
 
@@ -74,6 +131,66 @@ class TraceSettings:
             ),
             local_extrema_min_prominence=settings.get("local_extrema_min_prominence", 2),
             local_extrema_min_spacing=settings.get("local_extrema_min_spacing", 3),
+            enable_theoretical_reconstruction=settings.get(
+                "enable_theoretical_reconstruction",
+                False,
+            ),
+            reconstruction_max_hypotheses=settings.get(
+                "reconstruction_max_hypotheses",
+                5,
+            ),
+            reconstruction_max_accepted=settings.get(
+                "reconstruction_max_accepted",
+                3,
+            ),
+            reconstruction_max_bridge_length_px=settings.get(
+                "reconstruction_max_bridge_length_px",
+                12.0,
+            ),
+            reconstruction_max_bridge_angle_degrees=settings.get(
+                "reconstruction_max_bridge_angle_degrees",
+                45.0,
+            ),
+            reconstruction_tangent_points=settings.get(
+                "reconstruction_tangent_points",
+                4,
+            ),
+            reconstruction_min_endpoint_separation_px=settings.get(
+                "reconstruction_min_endpoint_separation_px",
+                2.0,
+            ),
+            reconstruction_min_topology_gain=settings.get(
+                "reconstruction_min_topology_gain",
+                0.08,
+            ),
+            reconstruction_min_acceptance_score=settings.get(
+                "reconstruction_min_acceptance_score",
+                0.58,
+            ),
+            reconstruction_max_added_ink_ratio=settings.get(
+                "reconstruction_max_added_ink_ratio",
+                0.12,
+            ),
+            reconstruction_confidence_weight=settings.get(
+                "reconstruction_confidence_weight",
+                0.20,
+            ),
+            reconstruction_topology_weight=settings.get(
+                "reconstruction_topology_weight",
+                0.55,
+            ),
+            reconstruction_geometry_weight=settings.get(
+                "reconstruction_geometry_weight",
+                0.25,
+            ),
+            reconstruction_use_recognition_verification=settings.get(
+                "reconstruction_use_recognition_verification",
+                True,
+            ),
+            reconstruction_min_confidence_gain=settings.get(
+                "reconstruction_min_confidence_gain",
+                0.0,
+            ),
         )
 
     def validate(self):
@@ -109,6 +226,51 @@ class TraceSettings:
 
         if self.local_extrema_min_spacing < 1:
             raise ValueError("local_extrema_min_spacing must be at least 1.")
+        if self.reconstruction_max_hypotheses < 1:
+            raise ValueError("reconstruction_max_hypotheses must be at least 1.")
+        if self.reconstruction_max_accepted < 1:
+            raise ValueError("reconstruction_max_accepted must be at least 1.")
+        if self.reconstruction_max_accepted > self.reconstruction_max_hypotheses:
+            raise ValueError(
+                "reconstruction_max_accepted cannot exceed "
+                "reconstruction_max_hypotheses."
+            )
+        if self.reconstruction_max_bridge_length_px <= 0:
+            raise ValueError(
+                "reconstruction_max_bridge_length_px must be positive."
+            )
+        if not 0 <= self.reconstruction_max_bridge_angle_degrees <= 90:
+            raise ValueError(
+                "reconstruction_max_bridge_angle_degrees must be between 0 and 90."
+            )
+        if self.reconstruction_tangent_points < 2:
+            raise ValueError("reconstruction_tangent_points must be at least 2.")
+        if self.reconstruction_min_endpoint_separation_px < 1:
+            raise ValueError(
+                "reconstruction_min_endpoint_separation_px must be at least 1."
+            )
+        for name in (
+            "reconstruction_min_topology_gain",
+            "reconstruction_min_acceptance_score",
+            "reconstruction_max_added_ink_ratio",
+            "reconstruction_confidence_weight",
+            "reconstruction_topology_weight",
+            "reconstruction_geometry_weight",
+        ):
+            value = getattr(self, name)
+            if not 0 <= value <= 1:
+                raise ValueError(f"{name} must be between 0 and 1.")
+        weight_sum = (
+            self.reconstruction_confidence_weight
+            + self.reconstruction_topology_weight
+            + self.reconstruction_geometry_weight
+        )
+        if abs(weight_sum - 1.0) > 1e-6:
+            raise ValueError("Reconstruction score weights must sum to 1.0.")
+        if not -1 <= self.reconstruction_min_confidence_gain <= 1:
+            raise ValueError(
+                "reconstruction_min_confidence_gain must be between -1 and 1."
+            )
 
 
     def to_dict(self):
@@ -132,6 +294,36 @@ class TraceSettings:
                 self.short_path_merge_min_advantage_degrees,
             "local_extrema_min_prominence": self.local_extrema_min_prominence,
             "local_extrema_min_spacing": self.local_extrema_min_spacing,
+            "enable_theoretical_reconstruction":
+                self.enable_theoretical_reconstruction,
+            "reconstruction_max_hypotheses":
+                self.reconstruction_max_hypotheses,
+            "reconstruction_max_accepted":
+                self.reconstruction_max_accepted,
+            "reconstruction_max_bridge_length_px":
+                self.reconstruction_max_bridge_length_px,
+            "reconstruction_max_bridge_angle_degrees":
+                self.reconstruction_max_bridge_angle_degrees,
+            "reconstruction_tangent_points":
+                self.reconstruction_tangent_points,
+            "reconstruction_min_endpoint_separation_px":
+                self.reconstruction_min_endpoint_separation_px,
+            "reconstruction_min_topology_gain":
+                self.reconstruction_min_topology_gain,
+            "reconstruction_min_acceptance_score":
+                self.reconstruction_min_acceptance_score,
+            "reconstruction_max_added_ink_ratio":
+                self.reconstruction_max_added_ink_ratio,
+            "reconstruction_confidence_weight":
+                self.reconstruction_confidence_weight,
+            "reconstruction_topology_weight":
+                self.reconstruction_topology_weight,
+            "reconstruction_geometry_weight":
+                self.reconstruction_geometry_weight,
+            "reconstruction_use_recognition_verification":
+                self.reconstruction_use_recognition_verification,
+            "reconstruction_min_confidence_gain":
+                self.reconstruction_min_confidence_gain,
         }
 
 

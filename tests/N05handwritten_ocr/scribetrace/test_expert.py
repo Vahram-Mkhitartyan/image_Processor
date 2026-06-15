@@ -9,7 +9,7 @@ import unittest
 import cv2
 import numpy as np
 
-from .expert import (
+from scripts.N05handwritten_ocr.scribetrace.expert import (
     SkeletonGraph,
     SkeletonPoint,
     TraceFeatureEncoder,
@@ -21,9 +21,15 @@ from .expert import (
     TraceSettings,
     run_scribetrace,
 )
-from .trace_features import TraceFeatureEncoder as ModularTraceFeatureEncoder
-from .trace_paths import TracePathExtractor as ModularTracePathExtractor
-from .trace_skeleton import SkeletonGraph as ModularSkeletonGraph
+from scripts.N05handwritten_ocr.scribetrace.trace_features import (
+    TraceFeatureEncoder as ModularTraceFeatureEncoder,
+)
+from scripts.N05handwritten_ocr.scribetrace.trace_paths import (
+    TracePathExtractor as ModularTracePathExtractor,
+)
+from scripts.N05handwritten_ocr.scribetrace.trace_skeleton import (
+    SkeletonGraph as ModularSkeletonGraph,
+)
 
 
 def build_graph(coordinates):
@@ -452,9 +458,15 @@ class TracePipelineTests(unittest.TestCase):
         self.assertEqual(1, cv2.countNonZero(fixed))
         with self.assertRaises(ValueError):
             TraceSettings(ink_threshold_mode="mystery")
+        with self.assertRaises(ValueError):
+            TraceSettings(
+                reconstruction_topology_weight=0.5,
+                reconstruction_geometry_weight=0.5,
+                reconstruction_confidence_weight=0.5,
+            )
 
     def test_completed_limited_counts_as_attempted_evidence(self):
-        from .expert import recognize
+        from scripts.N05handwritten_ocr.scribetrace.expert import recognize
 
         mask = np.zeros((20, 20), dtype=np.uint8)
         mask[2:4, 2:4] = 255
@@ -472,11 +484,171 @@ class TracePipelineTests(unittest.TestCase):
         self.assertEqual("completed_limited", result["status"])
 
     def test_n05_package_interface_imports(self):
-        from . import EXPERT_NAME, get_expert_manifest, recognize
+        from scripts.N05handwritten_ocr.scribetrace import (
+            EXPERT_NAME,
+            get_expert_manifest,
+            recognize,
+        )
 
         self.assertEqual("scribetrace", EXPERT_NAME)
         self.assertTrue(callable(get_expert_manifest))
         self.assertTrue(callable(recognize))
+
+
+class TheoreticalReconstructionTests(unittest.TestCase):
+    """Protect bounded ScribeTrace 4.0 reconstruction behavior."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def write_mask(self, name, mask):
+        path = os.path.join(self.temp_dir.name, name)
+        self.assertTrue(cv2.imwrite(path, mask))
+        return path
+
+    def settings(self, **overrides):
+        values = {
+            "enabled": True,
+            "save_debug": False,
+            "save_json": False,
+            "enable_mask_repair": False,
+            "enable_theoretical_reconstruction": True,
+            "minimum_ink_pixels": 1,
+            "minimum_trace_path_points": 1,
+            "reconstruction_max_bridge_length_px": 12,
+            "reconstruction_max_bridge_angle_degrees": 35,
+            "reconstruction_max_added_ink_ratio": 0.30,
+            "reconstruction_use_recognition_verification": False,
+        }
+        values.update(overrides)
+        return values
+
+    def test_clean_stroke_keeps_only_original_hypothesis(self):
+        mask = np.zeros((24, 36), dtype=np.uint8)
+        mask[12, 6:30] = 255
+        path = self.write_mask("clean.png", mask)
+
+        result = run_scribetrace(
+            TraceInput(mask_crop_path=path),
+            self.settings(),
+        )
+
+        reconstruction = result.reconstruction
+        self.assertEqual("completed_no_damage", reconstruction["status"])
+        self.assertEqual([], reconstruction["hypotheses"])
+        self.assertEqual([], reconstruction["accepted_hypothesis_ids"])
+        self.assertEqual(
+            "h0_original",
+            reconstruction["original_hypothesis"]["hypothesis_id"],
+        )
+
+    def test_aligned_broken_stroke_accepts_minimal_bridge(self):
+        mask = np.zeros((24, 40), dtype=np.uint8)
+        mask[12, 5:17] = 255
+        mask[12, 23:35] = 255
+        path = self.write_mask("broken.png", mask)
+
+        result = run_scribetrace(
+            TraceInput(mask_crop_path=path),
+            self.settings(),
+        )
+
+        reconstruction = result.reconstruction
+        self.assertEqual("completed", reconstruction["status"])
+        self.assertEqual(
+            "delegated_to_theoretical_reconstruction",
+            result.metrics["mask_repair"]["method"],
+        )
+        self.assertGreaterEqual(reconstruction["candidate_count"], 1)
+        self.assertGreaterEqual(reconstruction["accepted_count"], 1)
+        accepted = next(
+            hypothesis
+            for hypothesis in reconstruction["hypotheses"]
+            if hypothesis["accepted"]
+        )
+        self.assertEqual("endpoint_bridge", accepted["type"])
+        self.assertGreater(accepted["topology_gain"], 0)
+        self.assertEqual(
+            1,
+            accepted["reconstructed_topology"]["component_count"],
+        )
+        self.assertLess(
+            accepted["reconstructed_topology"]["endpoint_count"],
+            accepted["original_topology"]["endpoint_count"],
+        )
+
+    def test_incompatible_endpoint_directions_do_not_create_bridge(self):
+        mask = np.zeros((30, 30), dtype=np.uint8)
+        mask[8, 4:14] = 255
+        mask[14:25, 18] = 255
+        path = self.write_mask("incompatible.png", mask)
+
+        result = run_scribetrace(
+            TraceInput(mask_crop_path=path),
+            self.settings(
+                reconstruction_max_bridge_length_px=10,
+                reconstruction_max_bridge_angle_degrees=20,
+            ),
+        )
+
+        reconstruction = result.reconstruction
+        self.assertEqual("completed", reconstruction["status"])
+        self.assertEqual(0, reconstruction["candidate_count"])
+        self.assertEqual([], reconstruction["accepted_hypothesis_ids"])
+
+    def test_reconstruction_never_modifies_source_mask(self):
+        mask = np.zeros((24, 40), dtype=np.uint8)
+        mask[12, 5:17] = 255
+        mask[12, 23:35] = 255
+        original = mask.copy()
+        path = self.write_mask("immutable.png", mask)
+
+        run_scribetrace(
+            TraceInput(mask_crop_path=path),
+            self.settings(),
+        )
+
+        reloaded = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        self.assertTrue(np.array_equal(original, reloaded))
+
+    def test_reconstruction_debug_and_json_are_auditable(self):
+        mask = np.zeros((24, 40), dtype=np.uint8)
+        mask[12, 5:17] = 255
+        mask[12, 23:35] = 255
+        path = self.write_mask("auditable.png", mask)
+        output_dir = os.path.join(self.temp_dir.name, "scribetrace")
+
+        result = run_scribetrace(
+            TraceInput(
+                mask_crop_path=path,
+                output_dir=output_dir,
+                text_unit_id="repair/audit",
+            ),
+            self.settings(save_debug=True, save_json=True),
+        )
+
+        accepted = next(
+            hypothesis
+            for hypothesis in result.reconstruction["hypotheses"]
+            if hypothesis["accepted"]
+        )
+        for key in (
+            "reconstructed_mask_path",
+            "added_ink_mask_path",
+            "reconstruction_overlay_path",
+        ):
+            self.assertTrue(os.path.isfile(accepted[key]))
+            self.assertNotIn("repair/audit", accepted[key])
+        self.assertTrue(os.path.isfile(result.result_json_path))
+        with open(result.result_json_path, "r", encoding="utf-8") as file:
+            payload = json.load(file)
+        self.assertEqual(
+            result.reconstruction["accepted_hypothesis_ids"],
+            payload["reconstruction"]["accepted_hypothesis_ids"],
+        )
 
 
 if __name__ == "__main__":

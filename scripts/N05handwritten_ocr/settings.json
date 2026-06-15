@@ -31,7 +31,8 @@
       "enabled": false
     },
     "scribetrace": {
-      "enabled": false
+      "enabled": false,
+      "enable_theoretical_reconstruction": false
     },
     "character_detector": {
       "enabled": false

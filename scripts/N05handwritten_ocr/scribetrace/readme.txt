@@ -1,6 +1,73 @@
 ScribeTrace Expert
 ==================
 
+ScribeTrace 4.0: Theoretical Reconstruction
+-------------------------------------------
+Theoretical reconstruction is an opt-in reasoning layer built on top of normal
+ScribeTrace topology. It never overwrites the source mask and never replaces
+the normal trace result. The untouched interpretation is always retained as:
+
+    h0_original
+
+The reconstruction cycle is:
+
+    Hypothesize -> Reconstruct -> Retrace -> Verify -> Accept
+
+Current v4 foundation diagnoses:
+
+    disconnected ink components
+    abnormal endpoint counts
+    isolated skeleton points
+    fragmented short paths
+    visible holes without matching closed topology
+    possible border clipping
+
+Its first bounded repair primitive is endpoint bridging. Candidate endpoints
+must be close enough, their outward TracePath tangents must face each other,
+and the proposed bridge must mostly cross missing background rather than
+existing ink. Every candidate is drawn onto a copied mask and passed through
+the complete component, Zhang-Suen, graph, path, landmark, feature, and RF
+pipeline again.
+
+A repair cannot be accepted from RF confidence alone. It must exceed the
+minimum topology gain, stay below the synthetic-ink budget, and exceed the
+combined score:
+
+    topology_weight * topology_score
+    + geometry_weight * geometry_score
+    + confidence_weight * recognition_score
+
+Topology rewards reduced fragmentation, endpoint repair, isolated-point repair,
+and coherent loop recovery. It penalizes invented junctions and new short-path
+fragments. Geometry rewards tangent agreement, short bridges, and minimal ink.
+
+The integrated N05 setting remains disabled:
+
+    enable_theoretical_reconstruction: false
+
+Musashi or standalone tests can enable it explicitly. When enabled, the legacy
+automatic morphology repair is bypassed so reconstruction sees the exact
+damage and every added pixel remains attributable to a hypothesis.
+
+Reconstruction JSON contains:
+
+    version
+    cycle
+    original_hypothesis
+    diagnosis
+    hypotheses
+    accepted_hypothesis_ids
+
+Each hypothesis records bridge geometry, original/reconstructed topology,
+recognition evidence, acceptance score, added-pixel count, and debug paths.
+Debug artifacts are written under:
+
+    scribetrace/reconstruction/
+
+The current implementation intentionally supports only one bridge per
+hypothesis. Multi-repair search, loop-specific curved reconstruction, border
+continuation, and learned reconstruction ranking are future additive stages.
+
 Purpose
 -------
 ScribeTrace converts N02 binary ink masks into deterministic vector evidence.
@@ -85,6 +152,11 @@ in focused modules:
         Character-boundary proposals combining projection valleys, connected
         component attachment, exact TracePath edge lookup, virtual graph cuts,
         and coherent left/right vector-subgraph validation.
+
+    trace_reconstruction.py
+        Damage diagnosis, endpoint-tangent bridge hypotheses, copied-mask
+        reconstruction, complete retracing, verification, ranking, and
+        acceptance.
 
     trace_paths.py
         Complete edge traversal, deterministic loops, terminal-spur merging,
@@ -274,4 +346,4 @@ Tests
 -----
 
     .venv/bin/python -m unittest \
-        scripts.N05handwritten_ocr.scribetrace.test_expert
+        tests.N05handwritten_ocr.scribetrace.test_expert
