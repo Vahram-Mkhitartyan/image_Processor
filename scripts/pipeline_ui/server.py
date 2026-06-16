@@ -106,6 +106,11 @@ ARISTOTEL_RECONSTRUCTION_CYCLE = (
     "accept_or_reject",
 )
 
+NON_DOCUMENT_TEMP_FOLDERS = {
+    "aristotel_ui_preview",
+    "matenadata_4_0",
+}
+
 
 def _iso_timestamp(timestamp: float | None = None) -> str:
     """Return a local ISO timestamp suitable for JSON status records."""
@@ -335,6 +340,9 @@ class PipelineUiApplication:
             path.name
             for path in self.temp_dir.iterdir()
             if path.is_dir()
+            and path.name.lower() not in NON_DOCUMENT_TEMP_FOLDERS
+            and not path.name.lower().startswith("aristotel_")
+            and not path.name.lower().startswith("matenadata_")
         } if self.temp_dir.is_dir() else set()
         document_ids = sorted(set(sources) | temp_document_ids)
         documents = []
@@ -538,6 +546,20 @@ class PipelineUiApplication:
         ]
         return "".join(safe).strip("_")[:96] or "sample"
 
+    def _artifact_url_for_path(self, path: Path | str | None) -> str | None:
+        """Return a UI artifact URL for an existing image inside the project."""
+        if not path:
+            return None
+        candidate = Path(path).resolve()
+        if (
+            not candidate.is_file()
+            or candidate.suffix.lower() not in IMAGE_EXTENSIONS
+            or not candidate.is_relative_to(self.base_dir)
+        ):
+            return None
+        relative = candidate.relative_to(self.base_dir).as_posix()
+        return "/artifact?path=" + quote(relative, safe="")
+
     def _aristotel_source_inputs(self, limit: int):
         """Yield the first deterministic glyph records without scanning all data."""
         scripts_dir = str(self.scripts_dir)
@@ -602,6 +624,167 @@ class PipelineUiApplication:
             "note": note,
         }
 
+    def _aristotel_reconstruction_preview(
+        self,
+        sample,
+        damaged_path: Path,
+        sample_index: int,
+    ) -> dict:
+        """Run the current ScribeTrace reconstruction preview on one sample."""
+        scripts_dir = str(self.scripts_dir)
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+
+        from N05handwritten_ocr.scribetrace.expert import run_scribetrace
+        from N05handwritten_ocr.scribetrace.trace_models import TraceInput
+        import N05handwritten_ocr.scribetrace.trace_reconstruction as reconstruction_module
+
+        reconstruction_root = self.aristotel_preview_dir / "reconstruction"
+        reconstruction_root.mkdir(parents=True, exist_ok=True)
+        stable_id = self._safe_preview_name(
+            f"{sample_index:02d}_{sample.teacher_input.label}_{sample.damage_recipe}"
+        )
+        output_dir = reconstruction_root / stable_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        trace_input = TraceInput(
+            crop_path=str(damaged_path),
+            mask_crop_path=str(damaged_path),
+            visual_crop_path=str(damaged_path),
+            output_dir=str(output_dir),
+            text_unit_id=stable_id,
+            known_damage_recipes=[sample.damage_recipe],
+        )
+        trace_settings = {
+            "enabled": True,
+            "save_debug": True,
+            "save_json": True,
+            "enable_theoretical_reconstruction": True,
+            "enable_mask_repair": False,
+            "ink_threshold_mode": "binary",
+            "fixed_threshold_value": 128,
+            "minimum_ink_pixels": 4,
+            "maximum_component_count_for_full_trace": 50,
+            "minimum_trace_path_points": 4,
+            "reconstruction_use_recognition_verification": False,
+            "reconstruction_max_hypotheses": 5,
+            "reconstruction_max_accepted": 3,
+        }
+
+        original_predictor = reconstruction_module.predict_rf_candidates
+        reconstruction_module.predict_rf_candidates = lambda *args, **kwargs: []
+        try:
+            trace_result = run_scribetrace(trace_input, settings=trace_settings)
+        finally:
+            reconstruction_module.predict_rf_candidates = original_predictor
+
+        reconstruction = trace_result.reconstruction or {}
+        selected_path = reconstruction.get("selected_reconstructed_mask_path")
+        selected_hypothesis_id = reconstruction.get("selected_hypothesis_id")
+        selected_hypothesis = None
+        for hypothesis in reconstruction.get("hypotheses", []):
+            if hypothesis.get("hypothesis_id") == selected_hypothesis_id:
+                selected_hypothesis = hypothesis
+                break
+        selected_hypothesis = selected_hypothesis or (
+            reconstruction.get("hypotheses", [None])[0]
+            if reconstruction.get("hypotheses")
+            else None
+        )
+        overlay_path = (
+            selected_hypothesis.get("reconstruction_overlay_path")
+            if selected_hypothesis
+            else None
+        )
+        after_url = self._artifact_url_for_path(selected_path)
+        overlay_url = self._artifact_url_for_path(overlay_path)
+        process_images = [
+            {
+                "step": "00_damaged",
+                "label": "damaged input",
+                "url": self._artifact_url_for_path(damaged_path),
+            }
+        ]
+        debug_steps = (
+            ("01_components", "component debug", "component_debug_image"),
+            ("02_skeleton", "skeleton", "skeleton_debug_image"),
+            ("03_graph", "skeleton graph", "skeleton_graph_debug_image"),
+            ("04_trace_paths", "trace paths", "trace_paths_debug_image"),
+            ("05_landmarks", "landmarks", "landmarks_debug_image"),
+        )
+        for step, label, key in debug_steps:
+            url = self._artifact_url_for_path(trace_result.debug_paths.get(key))
+            if url:
+                process_images.append(
+                    {
+                        "step": step,
+                        "label": label,
+                        "url": url,
+                    }
+                )
+        if after_url:
+            process_images.append(
+                {
+                    "step": "06_reconstructed",
+                    "label": "selected reconstruction",
+                    "url": after_url,
+                }
+            )
+        if overlay_url:
+            process_images.append(
+                {
+                    "step": "07_overlay",
+                    "label": "reconstruction overlay",
+                    "url": overlay_url,
+                }
+            )
+
+        return {
+            "status": trace_result.status,
+            "error": trace_result.error,
+            "result_json_path": trace_result.result_json_path,
+            "result_json_url": self._artifact_url_for_path(
+                trace_result.result_json_path
+            ),
+            "recognition_bypassed_for_ui": True,
+            "reconstruction_status": reconstruction.get("status"),
+            "selected_hypothesis_id": selected_hypothesis_id,
+            "selected_feature_source": reconstruction.get(
+                "selected_feature_source"
+            ),
+            "candidate_count": reconstruction.get("candidate_count", 0),
+            "accepted_count": reconstruction.get("accepted_count", 0),
+            "allowed_defense_types": reconstruction.get(
+                "allowed_defense_types",
+                [],
+            ),
+            "implemented_defense_types": reconstruction.get(
+                "implemented_defense_types",
+                [],
+            ),
+            "unsupported_defense_types": reconstruction.get(
+                "unsupported_defense_types",
+                [],
+            ),
+            "damage_reasons": (
+                reconstruction.get("diagnosis", {}).get("damage_reasons", [])
+            ),
+            "after_url": after_url,
+            "overlay_url": overlay_url,
+            "after_caption": (
+                "selected reconstruction"
+                if after_url
+                else "kept damaged mask"
+            ),
+            "overlay_caption": (
+                "green added / red removed"
+                if overlay_url
+                else "no overlay emitted"
+            ),
+            "process_images": process_images,
+            "hypotheses": reconstruction.get("hypotheses", []),
+        }
+
     def aristotel_preview(self, limit: int = 10) -> dict:
         """Build a tiny deterministic Aristotel lab preview for the UI."""
         import cv2
@@ -654,6 +837,11 @@ class PipelineUiApplication:
                     self.base_dir
                 ).as_posix()
                 metadata = sample.to_metadata(output_path)
+                reconstruction_preview = self._aristotel_reconstruction_preview(
+                    sample=sample,
+                    damaged_path=output_path,
+                    sample_index=index,
+                )
 
                 samples.append(
                     {
@@ -683,6 +871,7 @@ class PipelineUiApplication:
                         "defense_preview": self._aristotel_defense_preview(
                             sample
                         ),
+                        "reconstruction_preview": reconstruction_preview,
                     }
                 )
                 if len(samples) >= safe_limit:

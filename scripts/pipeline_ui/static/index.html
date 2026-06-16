@@ -32,25 +32,88 @@
 
   <main class="shell">
     <aside class="left-rail">
-      <section class="rail-section">
-        <div class="section-heading">
-          <span>Documents</span>
-          <span id="document-count" class="count-pill">0</span>
-        </div>
-        <div id="document-list" class="document-list"></div>
-      </section>
+      <div class="sidebar-view active" data-sidebar-panel="artifact-trace">
+        <section class="rail-section">
+          <div class="section-heading">
+            <span>Documents</span>
+            <span id="document-count" class="count-pill">0</span>
+          </div>
+          <div id="document-list" class="document-list"></div>
+        </section>
 
-      <section class="rail-section utility-section">
-        <div class="section-heading">
-          <span>Utilities</span>
-        </div>
-        <div class="utility-grid">
-          <button class="utility-button" data-command="doctor">Doctor</button>
-          <button class="utility-button" data-command="status">Status</button>
-          <button class="utility-button" data-command="lines">Sacred lines</button>
-          <button class="utility-button danger" data-command="clean">Clean outputs</button>
-        </div>
-      </section>
+        <section class="rail-section utility-section">
+          <div class="section-heading">
+            <span>Pipeline Utilities</span>
+          </div>
+          <div class="utility-grid">
+            <button class="utility-button" data-command="doctor">Doctor</button>
+            <button class="utility-button" data-command="status">Status</button>
+            <button class="utility-button" data-command="lines">Sacred lines</button>
+            <button class="utility-button danger" data-command="clean">Clean outputs</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="sidebar-view" data-sidebar-panel="aristotel-lab">
+        <section class="rail-section">
+          <div class="section-heading">
+            <span>Teacher Lab</span>
+          </div>
+          <p class="rail-note">
+            Aristotel previews damage recipes on glyph samples. Document phase
+            controls are hidden here so the lab stays focused.
+          </p>
+          <div class="utility-grid single-column">
+            <button class="utility-button sidebar-refresh-aristotel">
+              Inspect samples
+            </button>
+            <button class="utility-button" data-command="status">System status</button>
+            <button class="utility-button" data-command="doctor">Doctor</button>
+          </div>
+        </section>
+
+        <section class="rail-section">
+          <div class="section-heading">
+            <span>Recipe Focus</span>
+          </div>
+          <div class="rail-chip-list">
+            <span>damage audit</span>
+            <span>recipe metadata</span>
+            <span>defense preview</span>
+          </div>
+        </section>
+      </div>
+
+      <div class="sidebar-view" data-sidebar-panel="training-lab">
+        <section class="rail-section">
+          <div class="section-heading">
+            <span>Training Lab</span>
+          </div>
+          <p class="rail-note">
+            Model reports and training commands live here. Test documents are
+            intentionally hidden because they are not training inputs.
+          </p>
+          <div class="utility-grid single-column">
+            <button class="utility-button sidebar-refresh-training">
+              Refresh training stats
+            </button>
+            <button class="utility-button" data-command="train">Train Minos</button>
+            <button class="utility-button" data-command="lines">Sacred lines</button>
+            <button class="utility-button" data-command="status">System status</button>
+          </div>
+        </section>
+
+        <section class="rail-section">
+          <div class="section-heading">
+            <span>Training Inputs</span>
+          </div>
+          <div class="rail-chip-list">
+            <span>reports/</span>
+            <span>models/</span>
+            <span>datasets/</span>
+          </div>
+        </section>
+      </div>
 
       <section class="project-card">
         <p class="eyebrow">PROJECT ROOT</p>
@@ -270,6 +333,13 @@
   </main>
 
   <div id="toast" class="toast" role="status"></div>
+  <section id="sample-detail" class="sample-detail" aria-hidden="true">
+    <button id="sample-detail-backdrop" class="sample-detail-backdrop" aria-label="Close detail view"></button>
+    <article class="sample-detail-card" role="dialog" aria-modal="true" aria-labelledby="sample-detail-title">
+      <button id="sample-detail-close" class="sample-detail-close" aria-label="Close detail view">×</button>
+      <div id="sample-detail-content"></div>
+    </article>
+  </section>
   <script src="/static/app.js"></script>
 </body>
 </html>

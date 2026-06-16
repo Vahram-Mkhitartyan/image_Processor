@@ -7,6 +7,7 @@ const state = {
   lastProcessSignature: "",
   artifactSearchTimer: null,
   aristotelLoaded: false,
+  aristotelSamples: [],
   trainingLoaded: false,
   activeView: "artifact-trace",
   previewZoom: 1,
@@ -15,6 +16,12 @@ const state = {
   previewDragging: false,
   previewDragX: 0,
   previewDragY: 0,
+  detailZoom: 1,
+  detailPanX: 0,
+  detailPanY: 0,
+  detailDragging: false,
+  detailDragX: 0,
+  detailDragY: 0,
 };
 
 const elements = {
@@ -40,6 +47,11 @@ const elements = {
   projectRoot: document.querySelector("#project-root"),
   refreshArtifacts: document.querySelector("#refresh-artifacts"),
   refreshAristotel: document.querySelector("#refresh-aristotel"),
+  sampleDetail: document.querySelector("#sample-detail"),
+  sampleDetailBackdrop: document.querySelector("#sample-detail-backdrop"),
+  sampleDetailClose: document.querySelector("#sample-detail-close"),
+  sampleDetailContent: document.querySelector("#sample-detail-content"),
+  sidebarPanels: document.querySelectorAll(".sidebar-view"),
   stopButton: document.querySelector("#stop-button"),
   systemState: document.querySelector("#system-state"),
   toast: document.querySelector("#toast"),
@@ -168,6 +180,9 @@ function setWorkspaceView(viewId) {
   });
   document.querySelectorAll(".workspace-view").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.viewPanel === viewId);
+  });
+  elements.sidebarPanels.forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.sidebarPanel === viewId);
   });
 
   if (viewId === "training-lab" && !state.trainingLoaded) {
@@ -352,6 +367,7 @@ async function loadArtifacts() {
 
 function renderAristotelPreview(payload) {
   elements.aristotelSamples.innerHTML = "";
+  state.aristotelSamples = payload.samples || [];
   if (payload.status !== "completed") {
     elements.aristotelSummary.textContent = (
       payload.message || "Aristotel preview is unavailable."
@@ -365,6 +381,7 @@ function renderAristotelPreview(payload) {
   );
 
   payload.samples.forEach((sample) => {
+    const reconstruction = sample.reconstruction_preview || {};
     const operations = (sample.operations || [])
       .map((operation) => {
         const name = operation.operation || operation.type || "operation";
@@ -377,6 +394,23 @@ function renderAristotelPreview(payload) {
     const cycle = (sample.defense_preview?.cycle || [])
       .map((step) => `<span>${escapeHtml(step)}</span>`)
       .join("");
+    const allowedDefenses = (reconstruction.allowed_defense_types || [])
+      .map((name) => `<span>${escapeHtml(name)}</span>`)
+      .join("");
+    const unsupportedDefenses = (reconstruction.unsupported_defense_types || [])
+      .map((name) => `<span>${escapeHtml(name)}</span>`)
+      .join("");
+    const damageReasons = (reconstruction.damage_reasons || [])
+      .map((name) => `<span>${escapeHtml(name)}</span>`)
+      .join("");
+    const processImages = (reconstruction.process_images || [])
+      .map((image) => `
+        <figure>
+          <img src="${image.url}" alt="">
+          <figcaption>${escapeHtml(image.step || "")} · ${escapeHtml(image.label || "trace step")}</figcaption>
+        </figure>
+      `)
+      .join("");
     const card = document.createElement("article");
     card.className = "aristotel-card";
     card.innerHTML = `
@@ -384,37 +418,286 @@ function renderAristotelPreview(payload) {
         <span class="aristotel-index">#${sample.sample_index}</span>
         <strong>${escapeHtml(sample.damage_recipe)}</strong>
         <span class="aristotel-label">${escapeHtml(sample.trust_label)}</span>
+        <button class="sample-detail-button" type="button">inspect</button>
       </div>
-      <div class="aristotel-image-pair">
-        <figure>
-          <img src="${sample.original_url}" alt="">
-          <figcaption>original · ${escapeHtml(sample.label)}</figcaption>
-        </figure>
-        <figure>
-          <img src="${sample.damaged_url}" alt="">
-          <figcaption>damaged · ${formatPercent(sample.changed_pixel_ratio)}</figcaption>
-        </figure>
+      <div class="aristotel-visual-block">
+        <div class="visual-block-title">
+          <strong>Damage pass</strong>
+          <span>${formatPercent(sample.changed_pixel_ratio)} changed</span>
+        </div>
+        <div class="aristotel-image-pair">
+          <figure>
+            <img src="${sample.original_url}" alt="">
+            <figcaption>original · ${escapeHtml(sample.label)}</figcaption>
+          </figure>
+          <figure>
+            <img src="${sample.damaged_url}" alt="">
+            <figcaption>damaged · ${formatPercent(sample.changed_pixel_ratio)}</figcaption>
+          </figure>
+        </div>
+        <div class="aristotel-metrics">
+          <span>changed ${sample.changed_pixel_count} px</span>
+          <span>severity ${Number(sample.severity || 0).toFixed(2)}</span>
+          <span title="${escapeHtml(sample.source_id || "")}">
+            source ${escapeHtml(sample.source_id || "unknown")}
+          </span>
+        </div>
+        <div class="aristotel-ops">${operations || "<span>no operation</span>"}</div>
       </div>
-      <div class="aristotel-metrics">
-        <span>changed ${sample.changed_pixel_count} px</span>
-        <span>severity ${Number(sample.severity || 0).toFixed(2)}</span>
-        <span title="${escapeHtml(sample.source_id || "")}">
-          source ${escapeHtml(sample.source_id || "unknown")}
-        </span>
-      </div>
-      <div class="aristotel-ops">${operations || "<span>no operation</span>"}</div>
-      <div class="defense-preview">
-        <strong>${escapeHtml(sample.defense_preview?.currently_available_tool || "diagnosis")}</strong>
-        <p>${escapeHtml(sample.defense_preview?.note || "")}</p>
-        <div class="defense-cycle">${cycle}</div>
+      <div class="reconstruction-preview">
+        <div class="reconstruction-title">
+          <strong>Defense process</strong>
+          <span>${escapeHtml(reconstruction.reconstruction_status || "not run")}</span>
+        </div>
+        <div class="reconstruction-process-strip">
+          ${processImages || '<div class="process-empty">No process images emitted.</div>'}
+        </div>
+        <div class="reconstruction-metrics">
+          <span>candidates ${escapeHtml(reconstruction.candidate_count ?? 0)}</span>
+          <span>accepted ${escapeHtml(reconstruction.accepted_count ?? 0)}</span>
+          <span>${escapeHtml(reconstruction.selected_hypothesis_id || "h0_original")}</span>
+          <span>${reconstruction.recognition_bypassed_for_ui ? "RF skipped in UI" : "RF checked"}</span>
+        </div>
+        <div class="reconstruction-defense-row">
+          <strong>routed</strong>
+          ${allowedDefenses || "<span>none</span>"}
+        </div>
+        <div class="reconstruction-defense-row muted">
+          <strong>unsupported</strong>
+          ${unsupportedDefenses || "<span>none</span>"}
+        </div>
+        <div class="reconstruction-defense-row muted">
+          <strong>signals</strong>
+          ${damageReasons || "<span>no topology signal</span>"}
+        </div>
+        <div class="defense-preview compact">
+          <strong>${escapeHtml(sample.defense_preview?.currently_available_tool || "diagnosis")}</strong>
+          <p>${escapeHtml(sample.defense_preview?.note || "")}</p>
+          <div class="defense-cycle">${cycle}</div>
+        </div>
       </div>
       <details class="aristotel-details">
         <summary>metadata</summary>
-        <pre>${escapeHtml(JSON.stringify(sample.metadata, null, 2))}</pre>
+        <pre>${escapeHtml(JSON.stringify({
+          metadata: sample.metadata,
+          reconstruction_preview: reconstruction,
+        }, null, 2))}</pre>
       </details>
     `;
+    card.querySelector(".sample-detail-button").addEventListener("click", () => {
+      openSampleDetail(sample);
+    });
+    card.querySelectorAll(".aristotel-visual-block, .reconstruction-preview").forEach(
+      (block) => {
+        block.addEventListener("click", () => openSampleDetail(sample));
+      },
+    );
     elements.aristotelSamples.appendChild(card);
   });
+}
+
+function sampleDetailImages(sample) {
+  const reconstruction = sample.reconstruction_preview || {};
+  const process = reconstruction.process_images || [];
+  return [
+    {
+      step: "original",
+      label: `original · ${sample.label}`,
+      url: sample.original_url,
+    },
+    {
+      step: "damaged",
+      label: `damaged · ${formatPercent(sample.changed_pixel_ratio)}`,
+      url: sample.damaged_url,
+    },
+    ...process,
+  ].filter((image) => image.url);
+}
+
+function renderSampleDetailHero(image) {
+  const hero = elements.sampleDetailContent.querySelector(".sample-detail-hero");
+  const caption = elements.sampleDetailContent.querySelector(".sample-detail-hero-caption");
+  if (!hero || !caption || !image) return;
+  resetDetailZoom();
+  hero.src = image.url;
+  caption.textContent = `${image.step || "step"} · ${image.label || "image"}`;
+}
+
+function applyDetailTransform() {
+  const hero = elements.sampleDetailContent.querySelector(".sample-detail-hero");
+  const zoomReset = elements.sampleDetailContent.querySelector(".detail-zoom-reset");
+  const heroWrap = elements.sampleDetailContent.querySelector(".sample-detail-hero-wrap");
+  if (!hero || !zoomReset || !heroWrap) return;
+  hero.style.transform = (
+    `translate(${state.detailPanX}px, ${state.detailPanY}px) `
+    + `scale(${state.detailZoom})`
+  );
+  zoomReset.textContent = `${Math.round(state.detailZoom * 100)}%`;
+  heroWrap.classList.toggle("zoomed", state.detailZoom > 1);
+}
+
+function resetDetailZoom() {
+  state.detailZoom = 1;
+  state.detailPanX = 0;
+  state.detailPanY = 0;
+  applyDetailTransform();
+}
+
+function setDetailZoom(nextZoom) {
+  state.detailZoom = Math.min(8, Math.max(0.5, nextZoom));
+  if (state.detailZoom <= 1) {
+    state.detailPanX = 0;
+    state.detailPanY = 0;
+  }
+  applyDetailTransform();
+}
+
+function wireSampleDetailZoom() {
+  const heroWrap = elements.sampleDetailContent.querySelector(".sample-detail-hero-wrap");
+  const zoomIn = elements.sampleDetailContent.querySelector(".detail-zoom-in");
+  const zoomOut = elements.sampleDetailContent.querySelector(".detail-zoom-out");
+  const zoomReset = elements.sampleDetailContent.querySelector(".detail-zoom-reset");
+  if (!heroWrap || !zoomIn || !zoomOut || !zoomReset) return;
+
+  zoomIn.addEventListener("click", () => setDetailZoom(state.detailZoom * 1.25));
+  zoomOut.addEventListener("click", () => setDetailZoom(state.detailZoom / 1.25));
+  zoomReset.addEventListener("click", resetDetailZoom);
+  heroWrap.addEventListener("dblclick", resetDetailZoom);
+  heroWrap.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    setDetailZoom(
+      state.detailZoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15),
+    );
+  }, { passive: false });
+
+  heroWrap.addEventListener("pointerdown", (event) => {
+    if (state.detailZoom <= 1) return;
+    state.detailDragging = true;
+    state.detailDragX = event.clientX - state.detailPanX;
+    state.detailDragY = event.clientY - state.detailPanY;
+    heroWrap.classList.add("dragging");
+    heroWrap.setPointerCapture(event.pointerId);
+  });
+
+  heroWrap.addEventListener("pointermove", (event) => {
+    if (!state.detailDragging) return;
+    state.detailPanX = event.clientX - state.detailDragX;
+    state.detailPanY = event.clientY - state.detailDragY;
+    applyDetailTransform();
+  });
+
+  function stopDetailDrag(event) {
+    state.detailDragging = false;
+    heroWrap.classList.remove("dragging");
+    if (event.pointerId !== undefined && heroWrap.hasPointerCapture(event.pointerId)) {
+      heroWrap.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  heroWrap.addEventListener("pointerup", stopDetailDrag);
+  heroWrap.addEventListener("pointercancel", stopDetailDrag);
+}
+
+function openSampleDetail(sample) {
+  const reconstruction = sample.reconstruction_preview || {};
+  const images = sampleDetailImages(sample);
+  const firstImage = images[0] || {};
+  const operationChips = (sample.operations || [])
+    .map((operation) => {
+      const name = operation.operation || operation.type || "operation";
+      return `<span title="${escapeHtml(JSON.stringify(operation))}">${escapeHtml(name)}</span>`;
+    })
+    .join("");
+  const processThumbs = images
+    .map((image, index) => `
+      <button
+        class="sample-detail-thumb ${index === 0 ? "active" : ""}"
+        type="button"
+        data-image-index="${index}"
+      >
+        <img src="${image.url}" alt="">
+        <span>${escapeHtml(image.step || "step")}</span>
+      </button>
+    `)
+    .join("");
+  const routed = (reconstruction.allowed_defense_types || [])
+    .map((name) => `<span>${escapeHtml(name)}</span>`)
+    .join("");
+  const unsupported = (reconstruction.unsupported_defense_types || [])
+    .map((name) => `<span>${escapeHtml(name)}</span>`)
+    .join("");
+
+  elements.sampleDetailContent.innerHTML = `
+    <div class="sample-detail-layout">
+      <section class="sample-detail-gallery">
+        <div class="sample-detail-hero-wrap">
+          <img class="sample-detail-hero" src="${firstImage.url || ""}" alt="">
+          <div class="detail-zoom-controls" aria-label="Detail image zoom controls">
+            <button class="detail-zoom-out" type="button" title="Zoom out">−</button>
+            <button class="detail-zoom-reset" type="button" title="Reset zoom">100%</button>
+            <button class="detail-zoom-in" type="button" title="Zoom in">+</button>
+          </div>
+          <span class="sample-detail-hero-caption">
+            ${escapeHtml(firstImage.step || "image")} · ${escapeHtml(firstImage.label || "")}
+          </span>
+        </div>
+        <div class="sample-detail-thumbs">
+          ${processThumbs}
+        </div>
+      </section>
+
+      <section class="sample-detail-info">
+        <p class="eyebrow">ARISTOTEL SAMPLE</p>
+        <h2 id="sample-detail-title">${escapeHtml(sample.damage_recipe)}</h2>
+        <p class="sample-detail-subtitle">
+          ${escapeHtml(sample.label)} · ${escapeHtml(sample.trust_label)}
+        </p>
+        <div class="sample-detail-score-grid">
+          <span><b>${formatPercent(sample.changed_pixel_ratio)}</b><small>changed</small></span>
+          <span><b>${sample.changed_pixel_count}</b><small>pixels</small></span>
+          <span><b>${Number(sample.severity || 0).toFixed(2)}</b><small>severity</small></span>
+          <span><b>${escapeHtml(reconstruction.accepted_count ?? 0)}</b><small>accepted</small></span>
+        </div>
+        <div class="sample-detail-chip-row">
+          ${operationChips || "<span>no operation metadata</span>"}
+        </div>
+        <div class="sample-detail-defense">
+          <strong>routed defenses</strong>
+          <div>${routed || "<span>none</span>"}</div>
+        </div>
+        <div class="sample-detail-defense muted">
+          <strong>unsupported defenses</strong>
+          <div>${unsupported || "<span>none</span>"}</div>
+        </div>
+        <details class="sample-detail-json" open>
+          <summary>full sample contract</summary>
+          <pre>${escapeHtml(JSON.stringify(sample, null, 2))}</pre>
+        </details>
+      </section>
+    </div>
+  `;
+
+  elements.sampleDetailContent.querySelectorAll(".sample-detail-thumb").forEach((button) => {
+    button.addEventListener("click", () => {
+      const image = images[Number(button.dataset.imageIndex)];
+      elements.sampleDetailContent.querySelectorAll(".sample-detail-thumb").forEach(
+        (item) => item.classList.remove("active"),
+      );
+      button.classList.add("active");
+      renderSampleDetailHero(image);
+    });
+  });
+
+  resetDetailZoom();
+  wireSampleDetailZoom();
+  elements.sampleDetail.classList.add("visible");
+  elements.sampleDetail.setAttribute("aria-hidden", "false");
+}
+
+function closeSampleDetail() {
+  resetDetailZoom();
+  elements.sampleDetail.classList.remove("visible");
+  elements.sampleDetail.setAttribute("aria-hidden", "true");
 }
 
 async function loadAristotelPreview() {
@@ -623,6 +906,10 @@ async function runCommand(command) {
 
   state.logOffset = 0;
   elements.consoleOutput.textContent = "";
+  document.querySelector(".console-panel")?.scrollIntoView({
+    behavior: "smooth",
+    block: "end",
+  });
   try {
     const payload = await requestJson("/api/run", {
       method: "POST",
@@ -630,6 +917,9 @@ async function runCommand(command) {
     });
     renderProcess(payload.process);
     showToast(`${command} launched`);
+    window.setTimeout(() => {
+      elements.consoleOutput.scrollTop = elements.consoleOutput.scrollHeight;
+    }, 80);
   } catch (error) {
     showToast(error.message, true);
   }
@@ -676,6 +966,19 @@ elements.refreshArtifacts.addEventListener("click", () => {
 elements.refreshAristotel.addEventListener("click", loadAristotelPreview);
 elements.refreshTraining.addEventListener("click", loadTrainingOverview);
 elements.runMinosTraining.addEventListener("click", () => runCommand("train"));
+elements.sampleDetailBackdrop.addEventListener("click", closeSampleDetail);
+elements.sampleDetailClose.addEventListener("click", closeSampleDetail);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && elements.sampleDetail.classList.contains("visible")) {
+    closeSampleDetail();
+  }
+});
+document.querySelectorAll(".sidebar-refresh-aristotel").forEach((button) => {
+  button.addEventListener("click", loadAristotelPreview);
+});
+document.querySelectorAll(".sidebar-refresh-training").forEach((button) => {
+  button.addEventListener("click", loadTrainingOverview);
+});
 elements.clearConsole.addEventListener("click", () => {
   elements.consoleOutput.textContent = "";
 });
@@ -697,6 +1000,24 @@ elements.previewViewport.addEventListener("wheel", (event) => {
   setPreviewZoom(
     state.previewZoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15),
   );
+}, { passive: false });
+
+document.addEventListener("wheel", (event) => {
+  const targetElement = (
+    event.target instanceof Element ? event.target : event.target.parentElement
+  );
+  const horizontalStrip = targetElement?.closest(
+    ".reconstruction-process-strip, .aristotel-image-pair, .sample-detail-thumbs",
+  );
+  if (!horizontalStrip) return;
+
+  const canScrollHorizontally = (
+    horizontalStrip.scrollWidth > horizontalStrip.clientWidth
+  );
+  if (!canScrollHorizontally) return;
+
+  event.preventDefault();
+  horizontalStrip.scrollLeft += event.deltaY || event.deltaX;
 }, { passive: false });
 
 elements.previewViewport.addEventListener("dblclick", resetPreviewZoom);

@@ -47,6 +47,13 @@ from .trace_skeleton import SkeletonGraph, SkeletonPointExtractor, TraceSkeleton
 from .trace_repair import TraceMaskRepairer
 from .trace_reconstruction import TheoreticalReconstructor
 
+try:
+    from ..condition.condition_inference import predict_condition
+    from ..condition.condition_router import route_condition
+except ImportError:  # Allows direct local debugging when N05 root is on sys.path.
+    from condition.condition_inference import predict_condition
+    from condition.condition_router import route_condition
+
 # Compatibility aliases retained for callers that imported private helpers.
 _coordinate_key = coordinate_key
 _sanitize_identifier = sanitize_identifier
@@ -358,6 +365,17 @@ def run_scribetrace(trace_input, settings=None):
             feature_vector=feature_vector,
             ink_holes=ink_holes,
         )
+
+        condition_verdict = predict_condition(
+            trace_result=trace_result,
+            known_damage_recipes=getattr(trace_input, "known_damage_recipes", None),
+        )
+        routing_advice = route_condition(condition_verdict)
+        trace_result.condition_verdict = condition_verdict.to_dict()
+        trace_result.routing_advice = routing_advice.to_dict()
+        metrics["condition"] = trace_result.condition_verdict
+        metrics["routing_advice"] = trace_result.routing_advice
+
         trace_result.reconstruction = TheoreticalReconstructor(
             trace_settings
         ).run(
@@ -365,6 +383,9 @@ def run_scribetrace(trace_input, settings=None):
             original_result=trace_result,
             output_dir=output_dir,
             stable_unit_id=trace_input.stable_unit_id(),
+            damage_verdict=trace_result.condition_verdict,
+            allowed_defenses=routing_advice.scribetrace_allowed_defenses,
+            known_damage_recipes=getattr(trace_input, "known_damage_recipes", None),
         )
         metrics["reconstruction"] = {
             "enabled": trace_result.reconstruction.get("enabled", False),

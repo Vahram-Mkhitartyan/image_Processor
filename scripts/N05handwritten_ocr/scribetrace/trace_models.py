@@ -24,6 +24,9 @@ class TraceInput:
         layer=None,
         document_bbox=None,
         final_bbox=None,
+        known_damage_recipes=None,
+        condition_verdict=None,
+        routing_advice=None,
     ):
         self.crop_path = crop_path
         self.mask_crop_path = mask_crop_path
@@ -37,6 +40,9 @@ class TraceInput:
         self.layer = layer
         self.document_bbox = document_bbox
         self.final_bbox = final_bbox
+        self.known_damage_recipes = list(known_damage_recipes or [])
+        self.condition_verdict = condition_verdict
+        self.routing_advice = routing_advice
 
     @classmethod
     def from_context(cls, crop_path, context):
@@ -55,6 +61,9 @@ class TraceInput:
             layer=context.get("layer"),
             document_bbox=context.get("document_bbox"),
             final_bbox=context.get("final_bbox"),
+            known_damage_recipes=context.get("known_damage_recipes"),
+            condition_verdict=context.get("condition_verdict"),
+            routing_advice=context.get("routing_advice"),
         )
 
     def validate(self):
@@ -101,6 +110,9 @@ class TraceInput:
             "layer": self.layer,
             "document_bbox": self.document_bbox,
             "final_bbox": self.final_bbox,
+            "known_damage_recipes": self.known_damage_recipes,
+            "condition_verdict": self.condition_verdict,
+            "routing_advice": self.routing_advice,
             "stable_unit_id": self.stable_unit_id(),
             "preferred_trace_path": self.preferred_trace_path(),
         }
@@ -401,6 +413,8 @@ class TraceResult:
         result_json_path=None,
         ink_holes=None,
         reconstruction=None,
+        condition_verdict=None,
+        routing_advice=None,
     ):
         self.expert_name = expert_name
         self.status = status
@@ -417,6 +431,8 @@ class TraceResult:
         self.result_json_path = result_json_path
         self.ink_holes = ink_holes or []
         self.reconstruction = reconstruction
+        self.condition_verdict = condition_verdict
+        self.routing_advice = routing_advice
 
     def component_count(self):
         return len(self.components)
@@ -474,6 +490,8 @@ class TraceResult:
             "ml_features": self.ml_features_dict(),
             "ink_hole_count": len(self.ink_holes),
             "ink_holes": [hole.to_dict() for hole in self.ink_holes],
+            "condition_verdict": self.condition_verdict,
+            "routing_advice": self.routing_advice,
             "reconstruction": self.reconstruction,
         }
 

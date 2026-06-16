@@ -45,7 +45,15 @@
     "short_path_merge_min_advantage_degrees": 10.0,
     "local_extrema_min_prominence": 2,
     "local_extrema_min_spacing": 3,
-    "enable_theoretical_reconstruction": false
+    "enable_theoretical_reconstruction": true,
+    "reconstruction_use_recognition_verification": false,
+    "reconstruction_max_defense_hypotheses": 6,
+    "reconstruction_gap_close_px": 3,
+    "reconstruction_max_removed_ink_ratio": 0.18,
+    "reconstruction_noise_max_component_area": 6,
+    "reconstruction_noise_max_component_ratio": 0.04,
+    "reconstruction_artifact_max_thickness_px": 1,
+    "reconstruction_border_extension_px": 3
   },
   "random_forest": {
     "n_estimators": 500,
