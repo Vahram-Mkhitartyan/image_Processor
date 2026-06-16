@@ -7,6 +7,7 @@ import mimetypes
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 import webbrowser
@@ -36,6 +37,7 @@ RUNNABLE_COMMANDS = {
     "visual",
     "printed_ocr",
     "handwritten_ocr",
+    "train",
     "doctor",
     "status",
     "counts",
@@ -94,6 +96,15 @@ STAGE_FOLDER_LOOKUP = {
     for stage in STAGES
     if stage["folder"]
 }
+
+ARISTOTEL_RECONSTRUCTION_CYCLE = (
+    "diagnose",
+    "hypothesize",
+    "reconstruct",
+    "retrace",
+    "verify",
+    "accept_or_reject",
+)
 
 
 def _iso_timestamp(timestamp: float | None = None) -> str:
@@ -268,8 +279,13 @@ class PipelineUiApplication:
         python_executable: Path,
     ) -> None:
         self.base_dir = base_dir.resolve()
+        self.scripts_dir = self.base_dir / "scripts"
         self.input_dir = self.base_dir / "handwritten_text"
         self.temp_dir = self.base_dir / "temp_processing"
+        self.reports_dir = self.base_dir / "reports"
+        self.models_dir = self.base_dir / "models"
+        self.aristotel_input_dir = self.base_dir / "Matenadata"
+        self.aristotel_preview_dir = self.temp_dir / "aristotel_ui_preview"
         self.static_dir = Path(__file__).resolve().parent / "static"
         self.process_manager = PipelineProcessManager(
             base_dir=self.base_dir,
@@ -513,6 +529,330 @@ class PipelineUiApplication:
             raise FileNotFoundError(candidate)
         return candidate
 
+    @staticmethod
+    def _safe_preview_name(value: str) -> str:
+        """Return a compact filesystem-safe name for generated preview files."""
+        safe = [
+            char if char.isalnum() or char in {"-", "_", "."} else "_"
+            for char in str(value)
+        ]
+        return "".join(safe).strip("_")[:96] or "sample"
+
+    def _aristotel_source_inputs(self, limit: int):
+        """Yield the first deterministic glyph records without scanning all data."""
+        scripts_dir = str(self.scripts_dir)
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+
+        from Cyber_Lin_Kuei_Assembly.Aristotel.teacher_models import (
+            TeacherInput,
+        )
+
+        if not self.aristotel_input_dir.is_dir():
+            return []
+
+        inputs = []
+        for class_folder in sorted(self.aristotel_input_dir.iterdir()):
+            if not class_folder.is_dir():
+                continue
+            for image_path in sorted(class_folder.iterdir()):
+                if image_path.suffix.lower() not in IMAGE_EXTENSIONS:
+                    continue
+                inputs.append(
+                    TeacherInput(
+                        image_path=image_path,
+                        label=class_folder.name,
+                        source_class=class_folder.name,
+                        source_folder=class_folder,
+                        metadata={
+                            "source_id": image_path.relative_to(
+                                self.aristotel_input_dir
+                            ).as_posix()
+                        },
+                    )
+                )
+                if len(inputs) >= limit:
+                    return inputs
+        return inputs
+
+    @staticmethod
+    def _aristotel_defense_preview(sample) -> dict:
+        """Explain how existing reconstruction concepts would inspect damage."""
+        if sample.trust_label == "repair_needed":
+            expected_action = "topology_repair_candidate"
+            note = (
+                "This recipe is labeled as repair-needed evidence; current "
+                "ScribeTrace reconstruction would diagnose topology and try "
+                "minimal endpoint-bridge hypotheses when endpoints agree."
+            )
+        else:
+            expected_action = "diagnose_before_repair"
+            note = (
+                "This recipe is uncertain evidence; current ScribeTrace should "
+                "first diagnose topology and avoid synthetic repair unless the "
+                "trace actually shows damaged structure."
+            )
+
+        return {
+            "engine": "theoretical_reconstruction",
+            "currently_available_tool": "endpoint_bridge",
+            "expected_action": expected_action,
+            "training_label": sample.trust_label,
+            "cycle": list(ARISTOTEL_RECONSTRUCTION_CYCLE),
+            "note": note,
+        }
+
+    def aristotel_preview(self, limit: int = 10) -> dict:
+        """Build a tiny deterministic Aristotel lab preview for the UI."""
+        import cv2
+
+        scripts_dir = str(self.scripts_dir)
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+
+        from Cyber_Lin_Kuei_Assembly.Aristotel import (
+            FileCorrupter,
+            build_default_recipes,
+        )
+
+        safe_limit = max(1, min(int(limit), 10))
+        recipes = build_default_recipes()
+        source_limit = max(1, (safe_limit + len(recipes) - 1) // len(recipes))
+        source_inputs = self._aristotel_source_inputs(source_limit)
+        if not source_inputs:
+            return {
+                "status": "missing_input",
+                "message": f"No glyph images found in {self.aristotel_input_dir}.",
+                "samples": [],
+                "sample_count": 0,
+                "recipe_count": len(recipes),
+                "updated_at": _iso_timestamp(),
+            }
+
+        sample_dir = self.aristotel_preview_dir / "samples"
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        corrupter = FileCorrupter(recipes=recipes, seed=404)
+        samples = []
+
+        for teacher_input in source_inputs:
+            for sample in corrupter.corrupt(teacher_input, epoch=0, variant=0):
+                index = len(samples) + 1
+                label = self._safe_preview_name(sample.teacher_input.label)
+                recipe = self._safe_preview_name(sample.damage_recipe)
+                output_name = (
+                    f"{index:02d}_{label}_{recipe}_{sample.sample_id}.png"
+                )
+                output_path = sample_dir / output_name
+                if not cv2.imwrite(str(output_path), sample.image):
+                    raise RuntimeError(f"Could not save preview: {output_path}")
+
+                original_path = sample.teacher_input.image_path.resolve()
+                original_relative = original_path.relative_to(
+                    self.base_dir
+                ).as_posix()
+                damaged_relative = output_path.relative_to(
+                    self.base_dir
+                ).as_posix()
+                metadata = sample.to_metadata(output_path)
+
+                samples.append(
+                    {
+                        "sample_index": index,
+                        "sample_id": sample.sample_id,
+                        "label": sample.teacher_input.label,
+                        "source_id": sample.teacher_input.metadata.get(
+                            "source_id"
+                        ),
+                        "damage_recipe": sample.damage_recipe,
+                        "severity": sample.severity,
+                        "trust_label": sample.trust_label,
+                        "changed_pixel_count": sample.changed_pixel_count,
+                        "changed_pixel_ratio": sample.changed_pixel_ratio,
+                        "operations": sample.operations,
+                        "original_path": str(original_path),
+                        "damaged_path": str(output_path.resolve()),
+                        "original_url": (
+                            "/artifact?path="
+                            + quote(original_relative, safe="")
+                        ),
+                        "damaged_url": (
+                            "/artifact?path="
+                            + quote(damaged_relative, safe="")
+                        ),
+                        "metadata": metadata,
+                        "defense_preview": self._aristotel_defense_preview(
+                            sample
+                        ),
+                    }
+                )
+                if len(samples) >= safe_limit:
+                    break
+            if len(samples) >= safe_limit:
+                break
+
+        return {
+            "status": "completed",
+            "input_root": str(self.aristotel_input_dir),
+            "output_root": str(self.aristotel_preview_dir),
+            "sample_count": len(samples),
+            "recipe_count": len(recipes),
+            "samples": samples,
+            "updated_at": _iso_timestamp(),
+        }
+
+    @staticmethod
+    def _load_json_if_exists(path: Path):
+        """Load a JSON report if it exists; otherwise return None."""
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _percent_metric(value) -> float | None:
+        """Normalize stored 0..1 metrics into display-friendly percentages."""
+        if value is None:
+            return None
+        try:
+            return round(float(value) * 100.0, 2)
+        except (TypeError, ValueError):
+            return None
+
+    def _training_run_record(self, report_dir: Path) -> dict | None:
+        """Build one compact training-run card from known report contracts."""
+        training_report = self._load_json_if_exists(
+            report_dir / "training_report.json"
+        )
+        evaluation_summary = self._load_json_if_exists(
+            report_dir / "evaluation_summary.json"
+        )
+        split_report = self._load_json_if_exists(report_dir / "split_report.json")
+        training_history = self._load_json_if_exists(
+            report_dir / "training_history.json"
+        )
+        if training_report is None and evaluation_summary is None:
+            return None
+
+        payload = training_report or evaluation_summary or {}
+        model_name = payload.get("model_name") or report_dir.name
+        model_path = payload.get("model_path")
+        if not model_path:
+            candidate_models = sorted(
+                self.models_dir.glob(f"{report_dir.name}/**/*"),
+                key=lambda path: path.stat().st_mtime if path.is_file() else 0,
+                reverse=True,
+            )
+            model_path = str(next((path for path in candidate_models if path.is_file()), ""))
+
+        modified_times = [
+            path.stat().st_mtime
+            for path in report_dir.rglob("*")
+            if path.is_file()
+        ]
+        latest_modified = max(modified_times) if modified_times else report_dir.stat().st_mtime
+        damage_metrics = self._load_json_if_exists(
+            report_dir / "damage_recipe_metrics.json"
+        )
+        recipe_scores = []
+        if isinstance(damage_metrics, dict):
+            test_metrics = damage_metrics.get("test", {})
+            for recipe_name, metrics in sorted(test_metrics.items()):
+                if not isinstance(metrics, dict):
+                    continue
+                recipe_scores.append(
+                    {
+                        "name": recipe_name,
+                        "count": metrics.get("count"),
+                        "top1": self._percent_metric(metrics.get("top1")),
+                        "top5": self._percent_metric(metrics.get("top5")),
+                    }
+                )
+
+        return {
+            "id": report_dir.name,
+            "model_name": model_name,
+            "model_type": payload.get("model_type", "unknown"),
+            "model_path": model_path,
+            "model_exists": bool(model_path and Path(model_path).is_file()),
+            "report_dir": str(report_dir),
+            "updated_at": _iso_timestamp(latest_modified),
+            "dataset_rows": payload.get("dataset_rows"),
+            "dataset_jsonl": payload.get("dataset_jsonl"),
+            "num_classes": payload.get("num_classes"),
+            "test_samples": payload.get("test_samples"),
+            "split": payload.get("split") or split_report,
+            "validation_top1": self._percent_metric(
+                payload.get("validation_top1")
+                or payload.get("checkpoint_val_top1")
+            ),
+            "validation_top5": self._percent_metric(
+                payload.get("validation_top5")
+                or payload.get("checkpoint_val_top5")
+            ),
+            "test_top1": self._percent_metric(payload.get("test_top1")),
+            "test_top5": self._percent_metric(payload.get("test_top5")),
+            "recipe_scores": recipe_scores[:18],
+            "training_history": (
+                training_history
+                if isinstance(training_history, list)
+                else []
+            ),
+            "notes": payload.get("notes", []),
+            "primary_report": (
+                str(report_dir / "training_report.json")
+                if (report_dir / "training_report.json").is_file()
+                else str(report_dir / "evaluation_summary.json")
+            ),
+        }
+
+    def training_overview(self) -> dict:
+        """Summarize existing model-training reports for the UI."""
+        runs = []
+        if self.reports_dir.is_dir():
+            for report_dir in sorted(self.reports_dir.iterdir()):
+                if not report_dir.is_dir():
+                    continue
+                record = self._training_run_record(report_dir)
+                if record is not None:
+                    runs.append(record)
+
+        runs.sort(key=lambda item: item["updated_at"], reverse=True)
+        active_scribetrace_model = self._load_json_if_exists(
+            self.models_dir / "scribetrace_active_model.json"
+        )
+        commands = [
+            {
+                "id": "train",
+                "label": "Train Minos",
+                "command": "train",
+                "description": "Run the existing main.py train command.",
+                "enabled": True,
+            },
+            {
+                "id": "scribetrace_rf",
+                "label": "ScribeTrace RF",
+                "command": None,
+                "description": (
+                    "Report viewer ready. Dedicated launcher will be added "
+                    "after we lock the exact export/train command."
+                ),
+                "enabled": False,
+            },
+        ]
+        return {
+            "status": "completed",
+            "report_root": str(self.reports_dir),
+            "model_root": str(self.models_dir),
+            "active_scribetrace_model": active_scribetrace_model,
+            "run_count": len(runs),
+            "runs": runs,
+            "commands": commands,
+            "process": self.process_manager.snapshot(),
+            "updated_at": _iso_timestamp(),
+        }
+
 
 def _handler_factory(application: PipelineUiApplication):
     """Create a request handler bound to one UI application."""
@@ -613,6 +953,14 @@ def _handler_factory(application: PipelineUiApplication):
                             limit=int(query.get("limit", ["240"])[0]),
                         )
                     )
+                elif parsed.path == "/api/aristotel-preview":
+                    self._send_json(
+                        application.aristotel_preview(
+                            limit=int(query.get("limit", ["10"])[0]),
+                        )
+                    )
+                elif parsed.path == "/api/training-overview":
+                    self._send_json(application.training_overview())
                 elif parsed.path == "/artifact":
                     artifact = application.resolve_artifact(
                         query.get("path", [""])[0]

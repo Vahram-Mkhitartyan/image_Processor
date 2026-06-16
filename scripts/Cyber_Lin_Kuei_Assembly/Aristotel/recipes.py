@@ -9,8 +9,13 @@ from .damage_operations import (
     CutLineDamage,
     DamageOperation,
     ErosionDamage,
+    StampInterferenceDamage,
+    BleedThroughDamage,
+    EdgeCropLossDamage,
+    ThresholdFailureDamage,
+    CompressionArtifactDamage,
+    InkOverlapDamage,
 )
-
 
 @dataclass
 class DamageRecipe:
@@ -61,7 +66,7 @@ def build_default_recipes():
     return [
         DamageRecipe(
             name="light_cut",
-            operations=[CutLineDamage(thickness=1)],
+            operations=[CutLineDamage(thickness=2)],
             severity=0.25,
             trust_label="repair_needed",
         ),
@@ -79,8 +84,94 @@ def build_default_recipes():
         ),
         DamageRecipe(
             name="light_erosion",
-            operations=[ErosionDamage(kernel_size=2, iterations=1)],
+            operations=[
+                ErosionDamage(
+                    boundary_remove_probability=0.12,
+                    kernel_size=2,
+                )
+            ],
+            severity=0.25,
+            trust_label="repair_needed",
+        ),
+        DamageRecipe(
+            name="stamp_interference",
+            operations=[
+                StampInterferenceDamage(
+                    opacity=0.55,
+                    ring_thickness=1,
+                    internal_line_count=3,
+                    max_added_ratio=0.35,
+                )
+            ],
+            severity=0.45,
+            trust_label="uncertain",
+        ),
+        DamageRecipe(
+            name="bleed_through",
+            operations=[
+                BleedThroughDamage(
+                    opacity=0.28,
+                    blur_kernel_size=5,
+                    min_shift_px=3,
+                    max_shift_px=8,
+                    max_added_ratio=0.30,
+                )
+            ],
+            severity=0.35,
+            trust_label="uncertain",
+        ),
+
+        DamageRecipe(
+            name="edge_crop_loss",
+            operations=[
+                EdgeCropLossDamage(
+                    min_crop_ratio=0.08,
+                    max_crop_ratio=0.20,
+                    max_removed_ratio=0.30,
+                    side="random",
+                )
+            ],
             severity=0.35,
             trust_label="repair_needed",
         ),
+        DamageRecipe(
+            name="threshold_failure",
+            operations=[
+                ThresholdFailureDamage(
+                    mode="random",
+                    min_changed_pixels=5,
+                    max_changed_ratio=0.30,
+                )
+            ],
+            severity=0.35,
+            trust_label="repair_needed",
+        ),
+        DamageRecipe(
+            name="compression_artifacts",
+            operations=[
+                CompressionArtifactDamage(
+                    jpeg_quality_min=6,
+                    jpeg_quality_max=25,
+                    downscale_min=0.50,
+                    downscale_max=0.90,
+                    max_changed_ratio=0.60,
+                )
+            ],
+            severity=0.25,
+            trust_label="uncertain",
+        ),
+        DamageRecipe(
+            name="ink_overlap",
+            operations=[
+                InkOverlapDamage(
+                    opacity=0.90,
+                    thickness=1,
+                    stroke_count=1,
+                    max_added_ratio=0.40,
+                )
+            ],
+            severity=0.40,
+            trust_label="uncertain",
+        )
+        
     ]

@@ -6,6 +6,9 @@ const state = {
   logOffset: 0,
   lastProcessSignature: "",
   artifactSearchTimer: null,
+  aristotelLoaded: false,
+  trainingLoaded: false,
+  activeView: "artifact-trace",
   previewZoom: 1,
   previewPanX: 0,
   previewPanY: 0,
@@ -20,6 +23,8 @@ const elements = {
   artifactSearch: document.querySelector("#artifact-search"),
   artifactSummary: document.querySelector("#artifact-summary"),
   artifactWarning: document.querySelector("#artifact-warning"),
+  aristotelSamples: document.querySelector("#aristotel-samples"),
+  aristotelSummary: document.querySelector("#aristotel-summary"),
   clearConsole: document.querySelector("#clear-console"),
   consoleOutput: document.querySelector("#console-output"),
   contactSheet: document.querySelector("#contact-sheet"),
@@ -34,10 +39,15 @@ const elements = {
   previewViewport: document.querySelector("#preview-viewport"),
   projectRoot: document.querySelector("#project-root"),
   refreshArtifacts: document.querySelector("#refresh-artifacts"),
+  refreshAristotel: document.querySelector("#refresh-aristotel"),
   stopButton: document.querySelector("#stop-button"),
   systemState: document.querySelector("#system-state"),
   toast: document.querySelector("#toast"),
+  refreshTraining: document.querySelector("#refresh-training"),
+  runMinosTraining: document.querySelector("#run-minos-training"),
   traceTitle: document.querySelector("#trace-title"),
+  trainingRuns: document.querySelector("#training-runs"),
+  trainingSummary: document.querySelector("#training-summary"),
   updatedAt: document.querySelector("#updated-at"),
   zoomControls: document.querySelector(".zoom-controls"),
   zoomIn: document.querySelector("#zoom-in"),
@@ -151,6 +161,25 @@ function renderProcess(process) {
   });
 }
 
+function setWorkspaceView(viewId) {
+  state.activeView = viewId;
+  document.querySelectorAll(".workspace-tab").forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === viewId);
+  });
+  document.querySelectorAll(".workspace-view").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.viewPanel === viewId);
+  });
+
+  if (viewId === "training-lab" && !state.trainingLoaded) {
+    loadTrainingOverview();
+  }
+  if (viewId === "aristotel-lab" && !state.aristotelLoaded) {
+    elements.aristotelSummary.textContent = (
+      "Press Inspect 10 samples to generate a fresh teacher preview."
+    );
+  }
+}
+
 function renderOverview(payload) {
   state.overview = payload;
   elements.projectRoot.textContent = payload.base_dir;
@@ -187,6 +216,17 @@ function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatPercent(value) {
+  return `${(Number(value || 0) * 100).toFixed(2)}%`;
+}
+
+function formatMetricPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "—";
+  }
+  return `${Number(value).toFixed(2)}%`;
 }
 
 function escapeHtml(value) {
@@ -310,6 +350,242 @@ async function loadArtifacts() {
   }
 }
 
+function renderAristotelPreview(payload) {
+  elements.aristotelSamples.innerHTML = "";
+  if (payload.status !== "completed") {
+    elements.aristotelSummary.textContent = (
+      payload.message || "Aristotel preview is unavailable."
+    );
+    return;
+  }
+
+  elements.aristotelSummary.textContent = (
+    `${payload.sample_count} samples · ${payload.recipe_count} active recipes · `
+    + `output: ${payload.output_root}`
+  );
+
+  payload.samples.forEach((sample) => {
+    const operations = (sample.operations || [])
+      .map((operation) => {
+        const name = operation.operation || operation.type || "operation";
+        return (
+          `<span title="${escapeHtml(JSON.stringify(operation))}">`
+          + `${escapeHtml(name)}</span>`
+        );
+      })
+      .join("");
+    const cycle = (sample.defense_preview?.cycle || [])
+      .map((step) => `<span>${escapeHtml(step)}</span>`)
+      .join("");
+    const card = document.createElement("article");
+    card.className = "aristotel-card";
+    card.innerHTML = `
+      <div class="aristotel-card-top">
+        <span class="aristotel-index">#${sample.sample_index}</span>
+        <strong>${escapeHtml(sample.damage_recipe)}</strong>
+        <span class="aristotel-label">${escapeHtml(sample.trust_label)}</span>
+      </div>
+      <div class="aristotel-image-pair">
+        <figure>
+          <img src="${sample.original_url}" alt="">
+          <figcaption>original · ${escapeHtml(sample.label)}</figcaption>
+        </figure>
+        <figure>
+          <img src="${sample.damaged_url}" alt="">
+          <figcaption>damaged · ${formatPercent(sample.changed_pixel_ratio)}</figcaption>
+        </figure>
+      </div>
+      <div class="aristotel-metrics">
+        <span>changed ${sample.changed_pixel_count} px</span>
+        <span>severity ${Number(sample.severity || 0).toFixed(2)}</span>
+        <span title="${escapeHtml(sample.source_id || "")}">
+          source ${escapeHtml(sample.source_id || "unknown")}
+        </span>
+      </div>
+      <div class="aristotel-ops">${operations || "<span>no operation</span>"}</div>
+      <div class="defense-preview">
+        <strong>${escapeHtml(sample.defense_preview?.currently_available_tool || "diagnosis")}</strong>
+        <p>${escapeHtml(sample.defense_preview?.note || "")}</p>
+        <div class="defense-cycle">${cycle}</div>
+      </div>
+      <details class="aristotel-details">
+        <summary>metadata</summary>
+        <pre>${escapeHtml(JSON.stringify(sample.metadata, null, 2))}</pre>
+      </details>
+    `;
+    elements.aristotelSamples.appendChild(card);
+  });
+}
+
+async function loadAristotelPreview() {
+  elements.aristotelSummary.textContent = "Asking Aristotel for 10 samples...";
+  elements.aristotelSamples.innerHTML = "";
+  elements.refreshAristotel.disabled = true;
+  try {
+    const payload = await requestJson("/api/aristotel-preview?limit=10");
+    renderAristotelPreview(payload);
+    state.aristotelLoaded = true;
+  } catch (error) {
+    showToast(error.message, true);
+    elements.aristotelSummary.textContent = error.message;
+  } finally {
+    elements.refreshAristotel.disabled = false;
+  }
+}
+
+function normalizeHistoryPoint(row, key) {
+  const value = Number(row?.[key]);
+  if (!Number.isFinite(value)) return null;
+  if (key.includes("top")) return value * 100;
+  return value;
+}
+
+function buildPolyline(history, key, width, height, padding, maxValue) {
+  const points = history
+    .map((row, index) => {
+      const value = normalizeHistoryPoint(row, key);
+      if (value === null) return null;
+      const x = padding + (
+        history.length <= 1
+          ? 0
+          : index * ((width - padding * 2) / (history.length - 1))
+      );
+      const y = height - padding - (
+        Math.max(0, Math.min(value, maxValue)) / maxValue
+      ) * (height - padding * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .filter(Boolean);
+  return points.join(" ");
+}
+
+function renderTrainingChart(history) {
+  if (!history?.length) {
+    return '<div class="training-chart-empty">No epoch history saved yet.</div>';
+  }
+
+  const width = 520;
+  const height = 170;
+  const padding = 22;
+  const keys = [
+    ["val_top1", "Val Top-1", "orange"],
+    ["val_top5", "Val Top-5", "green"],
+    ["train_top1", "Train Top-1", "blue"],
+  ];
+  const polylines = keys
+    .map(([key, label, color]) => {
+      const points = buildPolyline(history, key, width, height, padding, 100);
+      if (!points) return "";
+      return `<polyline class="chart-line ${color}" points="${points}"><title>${label}</title></polyline>`;
+    })
+    .join("");
+  const last = history[history.length - 1] || {};
+  const legend = keys
+    .map(([key, label, color]) => (
+      `<span class="${color}">${label}: `
+      + `${formatMetricPercent(normalizeHistoryPoint(last, key))}</span>`
+    ))
+    .join("");
+
+  return `
+    <div class="training-chart">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Training accuracy history">
+        <line class="chart-axis" x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}"></line>
+        <line class="chart-axis" x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}"></line>
+        <line class="chart-grid" x1="${padding}" y1="${padding}" x2="${width - padding}" y2="${padding}"></line>
+        <line class="chart-grid" x1="${padding}" y1="${height / 2}" x2="${width - padding}" y2="${height / 2}"></line>
+        ${polylines}
+      </svg>
+      <div class="training-chart-legend">${legend}</div>
+    </div>
+  `;
+}
+
+function renderRecipeScores(recipeScores) {
+  if (!recipeScores?.length) {
+    return '<div class="recipe-score-empty">No damage recipe metrics.</div>';
+  }
+  return recipeScores
+    .map((score) => `
+      <span title="count ${escapeHtml(score.count ?? "—")}">
+        ${escapeHtml(score.name)} · ${formatMetricPercent(score.top5)}
+      </span>
+    `)
+    .join("");
+}
+
+function renderTrainingOverview(payload) {
+  if (payload.status !== "completed") {
+    elements.trainingSummary.textContent = "Training telemetry unavailable.";
+    return;
+  }
+
+  const process = payload.process || {};
+  elements.trainingSummary.textContent = (
+    `${payload.run_count} report folders · active process: `
+    + `${process.command || "none"} / ${process.status || "idle"} · `
+    + `reports: ${payload.report_root}`
+  );
+  elements.trainingRuns.innerHTML = "";
+
+  if (!payload.runs.length) {
+    elements.trainingRuns.innerHTML = (
+      '<div class="training-empty">No training reports found yet.</div>'
+    );
+    return;
+  }
+
+  payload.runs.forEach((run) => {
+    const split = run.split || {};
+    const splitText = (
+      split.train !== undefined
+        ? `train ${split.train} · val ${split.validation} · test ${split.test}`
+        : "split unavailable"
+    );
+    const card = document.createElement("article");
+    card.className = "training-card";
+    card.innerHTML = `
+      <div class="training-card-head">
+        <div>
+          <strong>${escapeHtml(run.model_name)}</strong>
+          <small>${escapeHtml(run.model_type || "unknown")} · ${escapeHtml(run.updated_at)}</small>
+        </div>
+        <span class="${run.model_exists ? "model-ok" : "model-missing"}">
+          ${run.model_exists ? "model found" : "model missing"}
+        </span>
+      </div>
+      <div class="training-metrics">
+        <span><b>${formatMetricPercent(run.validation_top1)}</b><small>val top1</small></span>
+        <span><b>${formatMetricPercent(run.validation_top5)}</b><small>val top5</small></span>
+        <span><b>${formatMetricPercent(run.test_top1)}</b><small>test top1</small></span>
+        <span><b>${formatMetricPercent(run.test_top5)}</b><small>test top5</small></span>
+      </div>
+      ${renderTrainingChart(run.training_history)}
+      <div class="training-paths">
+        <code>${escapeHtml(run.model_path || "no model path")}</code>
+        <code>${escapeHtml(splitText)}</code>
+        <code>${escapeHtml(run.dataset_jsonl || run.primary_report || "")}</code>
+      </div>
+      <div class="recipe-score-row">
+        ${renderRecipeScores(run.recipe_scores)}
+      </div>
+    `;
+    elements.trainingRuns.appendChild(card);
+  });
+}
+
+async function loadTrainingOverview() {
+  elements.trainingSummary.textContent = "Reading model reports...";
+  try {
+    const payload = await requestJson("/api/training-overview");
+    renderTrainingOverview(payload);
+    state.trainingLoaded = true;
+  } catch (error) {
+    showToast(error.message, true);
+    elements.trainingSummary.textContent = error.message;
+  }
+}
+
 function appendConsoleLines(lines, truncated = false) {
   if (truncated) {
     elements.consoleOutput.textContent += (
@@ -376,6 +652,10 @@ document.querySelectorAll("[data-command]").forEach((button) => {
   button.addEventListener("click", () => runCommand(button.dataset.command));
 });
 
+document.querySelectorAll(".workspace-tab").forEach((button) => {
+  button.addEventListener("click", () => setWorkspaceView(button.dataset.view));
+});
+
 document.querySelectorAll(".stage-tab").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".stage-tab").forEach(
@@ -393,6 +673,9 @@ elements.stopButton.addEventListener("click", stopCommand);
 elements.refreshArtifacts.addEventListener("click", () => {
   loadOverview({ refreshArtifacts: true });
 });
+elements.refreshAristotel.addEventListener("click", loadAristotelPreview);
+elements.refreshTraining.addEventListener("click", loadTrainingOverview);
+elements.runMinosTraining.addEventListener("click", () => runCommand("train"));
 elements.clearConsole.addEventListener("click", () => {
   elements.consoleOutput.textContent = "";
 });

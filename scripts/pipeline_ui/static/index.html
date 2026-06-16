@@ -63,132 +63,195 @@
     </aside>
 
     <section class="workspace">
-      <section class="phase-panel">
-        <div class="panel-title-row">
-          <div>
-            <p class="eyebrow">EXECUTION RAIL</p>
-            <h2>Move the document through the system</h2>
+      <nav class="workspace-tabs" aria-label="Control room pages">
+        <button class="workspace-tab active" data-view="artifact-trace">
+          Artifact Trace
+        </button>
+        <button class="workspace-tab" data-view="aristotel-lab">
+          Aristotel Lab
+        </button>
+        <button class="workspace-tab" data-view="training-lab">
+          Training Lab
+        </button>
+      </nav>
+
+      <section class="workspace-view active" data-view-panel="artifact-trace">
+        <section class="phase-panel">
+          <div class="panel-title-row">
+            <div>
+              <p class="eyebrow">EXECUTION RAIL</p>
+              <h2>Move the document through the system</h2>
+            </div>
+            <div class="run-actions">
+              <button id="stop-button" class="stop-button" disabled>Stop</button>
+              <button class="pipeline-button" data-command="pipeline">
+                <span>Run full pipeline</span>
+                <span class="button-arrow">↗</span>
+              </button>
+            </div>
           </div>
-          <div class="run-actions">
-            <button id="stop-button" class="stop-button" disabled>Stop</button>
-            <button class="pipeline-button" data-command="pipeline">
-              <span>Run full pipeline</span>
-              <span class="button-arrow">↗</span>
+
+          <div class="phase-rail">
+            <button class="phase-card" data-command="prep" data-stage="n00">
+              <span class="phase-number">N00</span>
+              <strong>Prepare</strong>
+              <small>Color layers, masks, geometry</small>
+            </button>
+            <span class="phase-connector"></span>
+            <button class="phase-card" data-command="scribemap" data-stage="n01">
+              <span class="phase-number">N01</span>
+              <strong>ScribeMap</strong>
+              <small>Regions and spatial groups</small>
+            </button>
+            <span class="phase-connector"></span>
+            <button class="phase-card" data-command="refine" data-stage="n02">
+              <span class="phase-number">N02</span>
+              <strong>Refine</strong>
+              <small>Layer-aware crop preparation</small>
+            </button>
+            <span class="phase-connector"></span>
+            <button class="phase-card" data-command="visual" data-stage="n03">
+              <span class="phase-number">N03</span>
+              <strong>Route</strong>
+              <small>Minos visual classification</small>
+            </button>
+            <span class="phase-connector"></span>
+            <button class="phase-card" data-command="printed_ocr" data-stage="n04">
+              <span class="phase-number">N04</span>
+              <strong>Printed</strong>
+              <small>Printed OCR evidence</small>
+            </button>
+            <span class="phase-connector"></span>
+            <button class="phase-card" data-command="handwritten_ocr" data-stage="n05">
+              <span class="phase-number">N05</span>
+              <strong>Experts</strong>
+              <small>Handwriting expert map</small>
+            </button>
+          </div>
+        </section>
+
+        <section class="trace-panel">
+          <div class="trace-toolbar">
+            <div>
+              <p class="eyebrow">ARTIFACT TRACE</p>
+              <h2 id="trace-title">Select a document</h2>
+            </div>
+            <div class="trace-controls">
+              <label class="search-field">
+                <span>⌕</span>
+                <input id="artifact-search" type="search" placeholder="Filter artifacts">
+              </label>
+              <button id="refresh-artifacts" class="icon-button" title="Refresh artifacts">↻</button>
+            </div>
+          </div>
+
+          <div id="stage-tabs" class="stage-tabs">
+            <button class="stage-tab active" data-stage="all">ALL</button>
+            <button class="stage-tab" data-stage="input">SOURCE</button>
+            <button class="stage-tab" data-stage="n00">N00</button>
+            <button class="stage-tab" data-stage="n01">N01</button>
+            <button class="stage-tab" data-stage="n02">N02</button>
+            <button class="stage-tab" data-stage="n03">N03</button>
+            <button class="stage-tab" data-stage="n04">N04</button>
+            <button class="stage-tab" data-stage="n05">N05</button>
+            <button
+              class="stage-tab"
+              data-stage="n05"
+              data-query="character_unit_proposer/debug"
+            >SPLITS</button>
+            <button
+              class="stage-tab"
+              data-stage="n05"
+              data-query="_visual.png"
+            >LETTERS</button>
+          </div>
+
+          <div class="trace-layout">
+            <div class="preview-stage">
+              <div id="preview-empty" class="preview-empty">
+                <div class="empty-glyph">⌁</div>
+                <strong>No artifact selected</strong>
+                <span>Choose an image from the contact sheet.</span>
+              </div>
+              <div id="preview-viewport" class="preview-viewport">
+                <img
+                  id="artifact-preview"
+                  alt="Selected pipeline artifact"
+                  draggable="false"
+                >
+              </div>
+              <div class="zoom-controls" aria-label="Image zoom controls">
+                <button id="zoom-out" type="button" title="Zoom out">−</button>
+                <button id="zoom-reset" type="button" title="Reset zoom">100%</button>
+                <button id="zoom-in" type="button" title="Zoom in">+</button>
+              </div>
+              <div id="preview-caption" class="preview-caption">
+                <div>
+                  <span id="preview-kind" class="artifact-kind">artifact</span>
+                  <strong id="preview-name">No selection</strong>
+                </div>
+                <code id="preview-path">—</code>
+              </div>
+            </div>
+
+            <div class="contact-sheet-wrap">
+              <div class="contact-sheet-heading">
+                <span id="artifact-summary">0 artifacts</span>
+                <span id="artifact-warning"></span>
+              </div>
+              <div id="contact-sheet" class="contact-sheet"></div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="workspace-view" data-view-panel="aristotel-lab">
+        <section class="aristotel-panel">
+        <div class="aristotel-header">
+          <div>
+            <p class="eyebrow">ARISTOTEL LAB</p>
+            <h2>Damage teacher preview</h2>
+            <small>
+              Ten real glyph samples, existing damage recipes, and the
+              reconstruction-defense idea ScribeTrace will inspect later.
+            </small>
+          </div>
+          <button id="refresh-aristotel" class="aristotel-button">
+            Inspect 10 samples
+          </button>
+        </div>
+        <div id="aristotel-summary" class="aristotel-summary">
+          Waiting for Aristotel samples.
+        </div>
+        <div id="aristotel-samples" class="aristotel-samples"></div>
+        </section>
+      </section>
+
+      <section class="workspace-view" data-view-panel="training-lab">
+        <section class="training-panel">
+        <div class="training-header">
+          <div>
+            <p class="eyebrow">TRAINING LAB</p>
+            <h2>Model cockpit</h2>
+            <small>
+              Existing reports, model checkpoints, live command status, and
+              epoch graphs for trainers that save history.
+            </small>
+          </div>
+          <div class="training-actions">
+            <button id="refresh-training" class="training-button secondary">
+              Refresh stats
+            </button>
+            <button id="run-minos-training" class="training-button">
+              Train Minos
             </button>
           </div>
         </div>
-
-        <div class="phase-rail">
-          <button class="phase-card" data-command="prep" data-stage="n00">
-            <span class="phase-number">N00</span>
-            <strong>Prepare</strong>
-            <small>Color layers, masks, geometry</small>
-          </button>
-          <span class="phase-connector"></span>
-          <button class="phase-card" data-command="scribemap" data-stage="n01">
-            <span class="phase-number">N01</span>
-            <strong>ScribeMap</strong>
-            <small>Regions and spatial groups</small>
-          </button>
-          <span class="phase-connector"></span>
-          <button class="phase-card" data-command="refine" data-stage="n02">
-            <span class="phase-number">N02</span>
-            <strong>Refine</strong>
-            <small>Layer-aware crop preparation</small>
-          </button>
-          <span class="phase-connector"></span>
-          <button class="phase-card" data-command="visual" data-stage="n03">
-            <span class="phase-number">N03</span>
-            <strong>Route</strong>
-            <small>Minos visual classification</small>
-          </button>
-          <span class="phase-connector"></span>
-          <button class="phase-card" data-command="printed_ocr" data-stage="n04">
-            <span class="phase-number">N04</span>
-            <strong>Printed</strong>
-            <small>Printed OCR evidence</small>
-          </button>
-          <span class="phase-connector"></span>
-          <button class="phase-card" data-command="handwritten_ocr" data-stage="n05">
-            <span class="phase-number">N05</span>
-            <strong>Experts</strong>
-            <small>Handwriting expert map</small>
-          </button>
+        <div id="training-summary" class="training-summary">
+          Waiting for training telemetry.
         </div>
-      </section>
-
-      <section class="trace-panel">
-        <div class="trace-toolbar">
-          <div>
-            <p class="eyebrow">ARTIFACT TRACE</p>
-            <h2 id="trace-title">Select a document</h2>
-          </div>
-          <div class="trace-controls">
-            <label class="search-field">
-              <span>⌕</span>
-              <input id="artifact-search" type="search" placeholder="Filter artifacts">
-            </label>
-            <button id="refresh-artifacts" class="icon-button" title="Refresh artifacts">↻</button>
-          </div>
-        </div>
-
-        <div id="stage-tabs" class="stage-tabs">
-          <button class="stage-tab active" data-stage="all">ALL</button>
-          <button class="stage-tab" data-stage="input">SOURCE</button>
-          <button class="stage-tab" data-stage="n00">N00</button>
-          <button class="stage-tab" data-stage="n01">N01</button>
-          <button class="stage-tab" data-stage="n02">N02</button>
-          <button class="stage-tab" data-stage="n03">N03</button>
-          <button class="stage-tab" data-stage="n04">N04</button>
-          <button class="stage-tab" data-stage="n05">N05</button>
-          <button
-            class="stage-tab"
-            data-stage="n05"
-            data-query="character_unit_proposer/debug"
-          >SPLITS</button>
-          <button
-            class="stage-tab"
-            data-stage="n05"
-            data-query="_visual.png"
-          >LETTERS</button>
-        </div>
-
-        <div class="trace-layout">
-          <div class="preview-stage">
-            <div id="preview-empty" class="preview-empty">
-              <div class="empty-glyph">⌁</div>
-              <strong>No artifact selected</strong>
-              <span>Choose an image from the contact sheet.</span>
-            </div>
-            <div id="preview-viewport" class="preview-viewport">
-              <img
-                id="artifact-preview"
-                alt="Selected pipeline artifact"
-                draggable="false"
-              >
-            </div>
-            <div class="zoom-controls" aria-label="Image zoom controls">
-              <button id="zoom-out" type="button" title="Zoom out">−</button>
-              <button id="zoom-reset" type="button" title="Reset zoom">100%</button>
-              <button id="zoom-in" type="button" title="Zoom in">+</button>
-            </div>
-            <div id="preview-caption" class="preview-caption">
-              <div>
-                <span id="preview-kind" class="artifact-kind">artifact</span>
-                <strong id="preview-name">No selection</strong>
-              </div>
-              <code id="preview-path">—</code>
-            </div>
-          </div>
-
-          <div class="contact-sheet-wrap">
-            <div class="contact-sheet-heading">
-              <span id="artifact-summary">0 artifacts</span>
-              <span id="artifact-warning"></span>
-            </div>
-            <div id="contact-sheet" class="contact-sheet"></div>
-          </div>
-        </div>
+        <div id="training-runs" class="training-runs"></div>
+        </section>
       </section>
 
       <section class="console-panel">
