@@ -167,6 +167,7 @@ def build_default_recipes():
                     opacity=0.90,
                     thickness=1,
                     stroke_count=1,
+                    max_abs_angle_degrees=35,
                     max_added_ratio=0.40,
                 )
             ],

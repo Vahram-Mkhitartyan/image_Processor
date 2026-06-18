@@ -1131,6 +1131,7 @@ class InkOverlapDamage:
     max_added_ratio: float = 0.30
     max_attempts: int = 30
     stroke_count: int = 1
+    max_abs_angle_degrees: int = 35
 
     def apply(self, image, rng):
         damaged = image.copy()
@@ -1162,58 +1163,43 @@ class InkOverlapDamage:
 
         for attempt in range(self.max_attempts):
             overlap_mask = np.zeros((height, width), dtype=np.uint8)
+            stroke_angles = []
 
             for _ in range(max(1, int(self.stroke_count))):
-                # Pick one of four crossing directions.
-                direction = int(rng.integers(0, 4))
+                # Keep generated overlap strokes near horizontal/slanted.
+                # Earlier versions generated vertical and hard diagonal attacks,
+                # which pushed reconstruction past the current target boundary.
+                max_abs_angle = max(0, min(85, int(self.max_abs_angle_degrees)))
+                angle_degrees = float(rng.integers(-max_abs_angle, max_abs_angle + 1))
+                angle_radians = np.deg2rad(angle_degrees)
 
-                if direction == 0:
-                    # left -> right
-                    p1 = (
-                        int(np.clip(x - rng.integers(0, max(1, bbox_w // 3 + 1)), 0, width - 1)),
-                        int(rng.integers(y, y + bbox_h)),
-                    )
-                    p3 = (
-                        int(np.clip(x + bbox_w + rng.integers(0, max(1, bbox_w // 3 + 1)), 0, width - 1)),
-                        int(rng.integers(y, y + bbox_h)),
-                    )
+                center_x = (
+                    x
+                    + bbox_w / 2.0
+                    + float(rng.integers(-max(1, bbox_w // 5), max(2, bbox_w // 5 + 1)))
+                )
+                center_y = (
+                    y
+                    + bbox_h / 2.0
+                    + float(rng.integers(-max(1, bbox_h // 5), max(2, bbox_h // 5 + 1)))
+                )
+                span = max(8.0, float(max(bbox_w, bbox_h)) * 1.55)
+                dx = np.cos(angle_radians) * span / 2.0
+                dy = np.sin(angle_radians) * span / 2.0
 
-                elif direction == 1:
-                    # top -> bottom
-                    p1 = (
-                        int(rng.integers(x, x + bbox_w)),
-                        int(np.clip(y - rng.integers(0, max(1, bbox_h // 3 + 1)), 0, height - 1)),
-                    )
-                    p3 = (
-                        int(rng.integers(x, x + bbox_w)),
-                        int(np.clip(y + bbox_h + rng.integers(0, max(1, bbox_h // 3 + 1)), 0, height - 1)),
-                    )
-
-                elif direction == 2:
-                    # diagonal top-left -> bottom-right
-                    p1 = (
-                        int(np.clip(x - rng.integers(0, max(1, bbox_w // 4 + 1)), 0, width - 1)),
-                        int(np.clip(y - rng.integers(0, max(1, bbox_h // 4 + 1)), 0, height - 1)),
-                    )
-                    p3 = (
-                        int(np.clip(x + bbox_w + rng.integers(0, max(1, bbox_w // 4 + 1)), 0, width - 1)),
-                        int(np.clip(y + bbox_h + rng.integers(0, max(1, bbox_h // 4 + 1)), 0, height - 1)),
-                    )
-
-                else:
-                    # diagonal bottom-left -> top-right
-                    p1 = (
-                        int(np.clip(x - rng.integers(0, max(1, bbox_w // 4 + 1)), 0, width - 1)),
-                        int(np.clip(y + bbox_h + rng.integers(0, max(1, bbox_h // 4 + 1)), 0, height - 1)),
-                    )
-                    p3 = (
-                        int(np.clip(x + bbox_w + rng.integers(0, max(1, bbox_w // 4 + 1)), 0, width - 1)),
-                        int(np.clip(y - rng.integers(0, max(1, bbox_h // 4 + 1)), 0, height - 1)),
-                    )
+                p1 = (
+                    int(np.clip(round(center_x - dx), 0, width - 1)),
+                    int(np.clip(round(center_y - dy), 0, height - 1)),
+                )
+                p3 = (
+                    int(np.clip(round(center_x + dx), 0, width - 1)),
+                    int(np.clip(round(center_y + dy), 0, height - 1)),
+                )
+                stroke_angles.append(angle_degrees)
 
                 # Middle control point makes it look more handwritten/curved.
-                mid_x = int((p1[0] + p3[0]) / 2 + rng.integers(-max(1, bbox_w // 4), max(2, bbox_w // 4 + 1)))
-                mid_y = int((p1[1] + p3[1]) / 2 + rng.integers(-max(1, bbox_h // 4), max(2, bbox_h // 4 + 1)))
+                mid_x = int((p1[0] + p3[0]) / 2 + rng.integers(-max(1, bbox_w // 6), max(2, bbox_w // 6 + 1)))
+                mid_y = int((p1[1] + p3[1]) / 2 + rng.integers(-max(1, bbox_h // 6), max(2, bbox_h // 6 + 1)))
 
                 p2 = (
                     int(np.clip(mid_x, 0, width - 1)),
@@ -1281,6 +1267,7 @@ class InkOverlapDamage:
                 "added_foreground_pixels": added_pixels,
                 "added_foreground_ratio": added_ratio,
                 "overlap_mask_pixels": int(cv2.countNonZero(overlap_mask)),
+                "stroke_angles_degrees": [float(value) for value in stroke_angles],
             }
             break
 
@@ -1301,6 +1288,8 @@ class InkOverlapDamage:
             "opacity": float(self.opacity),
             "thickness": int(self.thickness),
             "stroke_count": int(self.stroke_count),
+            "max_abs_angle_degrees": int(self.max_abs_angle_degrees),
+            "stroke_angles_degrees": best_candidate["stroke_angles_degrees"],
             "overlap_mask_pixels": best_candidate["overlap_mask_pixels"],
             "added_foreground_pixels": best_candidate["added_foreground_pixels"],
             "added_foreground_ratio": best_candidate["added_foreground_ratio"],

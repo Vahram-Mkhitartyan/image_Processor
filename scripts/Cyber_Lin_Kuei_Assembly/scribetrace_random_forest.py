@@ -936,9 +936,7 @@ def export_scribetrace_v4_dataset(limit_per_class=None):
                 )
                 generated = []
                 if include_clean:
-                    clean_image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
-                    if clean_image is None:
-                        raise ValueError(f"Could not read source glyph: {image_path}")
+                    clean_image = corrupter.load_image(image_path)
                     generated.append(
                         (
                             clean_image,

@@ -11,6 +11,60 @@ from .router import DatasetRouter
 from .teacher_models import DamagedSample, OutputFolders, TeacherInput
 
 
+def binarize_source_glyph(image: np.ndarray, threshold_margin: int = 20) -> np.ndarray:
+    """
+    Convert a clean source glyph into ScribeTrace's binary mask contract.
+
+    Args:
+        image: Grayscale or color glyph image.
+        threshold_margin: Extra tolerance around Otsu's threshold so weak
+            anti-aliased edge pixels are kept instead of erased.
+
+    Returns:
+        A uint8 image where foreground ink is 255 and background is 0.
+    """
+    source = np.asarray(image)
+    if source.ndim == 3:
+        source = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
+    source = source.astype(np.uint8, copy=False)
+    if source.size == 0:
+        raise ValueError("Cannot binarize an empty source glyph.")
+
+    unique_values = np.unique(source)
+    if unique_values.size <= 2 and set(unique_values.tolist()).issubset({0, 255}):
+        return source.copy()
+
+    border = np.concatenate(
+        [
+            source[0, :],
+            source[-1, :],
+            source[:, 0],
+            source[:, -1],
+        ]
+    )
+    background_is_dark = float(np.median(border)) < 128
+    otsu_threshold, _ = cv2.threshold(
+        source,
+        0,
+        255,
+        cv2.THRESH_BINARY | cv2.THRESH_OTSU,
+    )
+    threshold_margin = max(0, int(threshold_margin))
+
+    if background_is_dark:
+        # Matenadata commonly has white glyphs on black. Keep faint gray
+        # anti-aliased stroke edges, but do not turn the whole background on.
+        cutoff = max(6, min(int(otsu_threshold) - threshold_margin, 32))
+        foreground = source > cutoff
+    else:
+        # Also support dark glyphs on light backgrounds by preserving weak
+        # dark edge pixels near the stroke boundary.
+        cutoff = min(249, max(int(otsu_threshold) + threshold_margin, 223))
+        foreground = source < cutoff
+
+    return np.where(foreground, 255, 0).astype(np.uint8)
+
+
 class FileCorrupter:
     """Create deterministic degradations without retaining them on disk."""
 
@@ -22,11 +76,11 @@ class FileCorrupter:
             raise ValueError("Damage recipe names must be unique.")
 
     def load_image(self, image_path: Path):
-        """Load one source glyph as grayscale."""
+        """Load one source glyph and normalize it to a binary ink mask."""
         image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
         if image is None:
             raise ValueError(f"Could not read image: {image_path}")
-        return image
+        return binarize_source_glyph(image)
 
     def _sample_identity(
         self,

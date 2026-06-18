@@ -38,6 +38,7 @@ const elements = {
   documentCount: document.querySelector("#document-count"),
   documentList: document.querySelector("#document-list"),
   heartbeat: document.querySelector("#heartbeat"),
+  hardRefreshUi: document.querySelector("#hard-refresh-ui"),
   previewCaption: document.querySelector("#preview-caption"),
   previewEmpty: document.querySelector("#preview-empty"),
   previewKind: document.querySelector("#preview-kind"),
@@ -88,6 +89,33 @@ function showToast(message, isError = false) {
     () => elements.toast.classList.remove("visible"),
     3200,
   );
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "readonly");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
+}
+
+function hardRefreshUi() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("ui_refresh", Date.now().toString());
+  window.location.replace(url.toString());
 }
 
 function stageProgressMarkup(documentRecord) {
@@ -251,6 +279,300 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function formatScore(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "—";
+  }
+  return Number(value).toFixed(3);
+}
+
+function shortStageName(stage) {
+  return String(stage || "unknown")
+    .replace("stage_", "")
+    .replaceAll("_", " ");
+}
+
+function renderStageTimeline(reconstruction) {
+  const records = reconstruction.stage_records || [];
+  const plan = reconstruction.stage_defense_plan || {};
+  const stages = records.length
+    ? records
+    : Object.entries(plan).map(([stage, names], index) => ({
+      stage,
+      stage_index: index,
+      routed_defense_types: names || [],
+      implemented_defense_types: [],
+      generated_hypothesis_ids: [],
+      generated_count: 0,
+      notes: [],
+    }));
+
+  if (!stages.length) {
+    return '<div class="stage-timeline empty">No staged defense plan emitted.</div>';
+  }
+
+  return `
+    <div class="stage-timeline">
+      ${stages.map((stage) => {
+        const routed = stage.routed_defense_types || [];
+        const implemented = stage.implemented_defense_types || [];
+        const generated = Number(stage.generated_count || 0);
+        const state = generated > 0
+          ? "generated"
+          : routed.length
+            ? "routed"
+            : "empty";
+        const notes = (stage.notes || []).slice(0, 2)
+          .map((note) => `<span>${escapeHtml(note)}</span>`)
+          .join("");
+        return `
+          <article class="stage-timeline-card ${state}">
+            <strong>${escapeHtml(shortStageName(stage.stage))}</strong>
+            <small>r${routed.length} · i${implemented.length} · h${generated}</small>
+            <div>
+              ${
+                routed.length
+                  ? routed.map((name) => `<span>${escapeHtml(name)}</span>`).join("")
+                  : "<span>no routed tool</span>"
+              }
+            </div>
+            ${notes ? `<p>${notes}</p>` : ""}
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderDefenseToolSummary(reconstruction) {
+  const tools = reconstruction.tool_summary || [];
+  if (!tools.length) {
+    return '<div class="defense-tool-grid empty">No routed defenses.</div>';
+  }
+  const cards = tools
+    .map((tool) => `
+      <span
+        class="defense-tool-chip ${escapeHtml(tool.state || "unknown")}"
+        title="${escapeHtml(JSON.stringify(tool))}"
+      >
+        <strong>${escapeHtml(tool.defense_name)}</strong>
+        <small>
+          ${escapeHtml(shortStageName(tool.stage))}
+          · ${escapeHtml(tool.state || "unknown")}
+          · c${escapeHtml(tool.candidate_count ?? 0)}
+          · a${escapeHtml(tool.accepted_count ?? 0)}
+        </small>
+      </span>
+    `)
+    .join("");
+  return `<div class="defense-tool-grid">${cards}</div>`;
+}
+
+function renderHypothesisMiniCards(reconstruction) {
+  const hypotheses = reconstruction.hypotheses || [];
+  if (!hypotheses.length) {
+    return '<div class="hypothesis-empty">No repair hypotheses generated.</div>';
+  }
+  return `
+    <div class="hypothesis-strip">
+      ${hypotheses.map((hypothesis) => {
+        const firstImage = hypothesis.primary_image_url
+          || hypothesis.image_steps?.[0]?.url
+          || "";
+        const status = hypothesis.selected
+          ? "selected"
+          : hypothesis.accepted
+            ? "accepted"
+            : "rejected";
+        const reasons = (hypothesis.rejection_reasons || []).slice(0, 2)
+          .map((reason) => `<span>${escapeHtml(reason)}</span>`)
+          .join("");
+        const chain = (hypothesis.defense_chain || [])
+          .map((name) => escapeHtml(name))
+          .join(" → ");
+        const parent = hypothesis.debug_reference_hypothesis_id
+          || hypothesis.branch_parent_hypothesis_id
+          || "h0_original";
+        return `
+          <article class="hypothesis-mini ${status}">
+            <div class="hypothesis-mini-image">
+              ${
+                firstImage
+                  ? `<img src="${firstImage}" alt="">`
+                  : '<span>no image</span>'
+              }
+            </div>
+            <div class="hypothesis-mini-body">
+              <strong>${escapeHtml(hypothesis.hypothesis_id || "hypothesis")}</strong>
+              <span>${escapeHtml(hypothesis.defense_name || "unknown")}</span>
+              <small>${escapeHtml(shortStageName(hypothesis.stage))} · ${status} · score ${formatScore(hypothesis.score)}</small>
+              <small title="${chain}">from ${escapeHtml(parent)}</small>
+              <div class="hypothesis-reasons">${reasons || "<span>passes verifier</span>"}</div>
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderLineRemovalSequences(reconstruction, options = {}) {
+  const sequences = reconstruction.line_removal_sequences || [];
+  if (!sequences.length) {
+    return "";
+  }
+
+  const compact = Boolean(options.compact);
+  return `
+    <section class="line-removal-sequences ${compact ? "compact" : ""}">
+      <div class="line-removal-title">
+        <strong>Line-removal sequence</strong>
+        <span>${sequences.length} candidate${sequences.length === 1 ? "" : "s"}</span>
+      </div>
+      ${sequences.map((sequence) => {
+        const cleanup = sequence.cleanup || {};
+        const bridge = sequence.bridge || null;
+        const images = sequence.images || [];
+        const tags = [
+          cleanup.hypothesis_id ? `cut ${cleanup.hypothesis_id}` : null,
+          bridge?.hypothesis_id ? `bridge ${bridge.hypothesis_id}` : null,
+          cleanup.accepted ? "cut accepted" : "cut rejected",
+          bridge ? (bridge.accepted ? "bridge accepted" : "bridge rejected") : "no bridge",
+        ].filter(Boolean);
+
+        return `
+          <article class="line-removal-sequence">
+            <header>
+              <div>
+                <strong>${escapeHtml(cleanup.defense_name || "linear_artifact_removal")}</strong>
+                <small>${escapeHtml(cleanup.hypothesis_id || "unknown")}</small>
+              </div>
+              <span>${formatScore(cleanup.score)}</span>
+            </header>
+            <div class="line-removal-images">
+              ${images.map((image) => `
+                <figure>
+                  <img src="${image.url}" alt="">
+                  <figcaption>${escapeHtml(image.label || image.step || "image")}</figcaption>
+                </figure>
+              `).join("")}
+            </div>
+            <div class="line-removal-tags">
+              ${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </section>
+  `;
+}
+
+function renderHypothesisWorkbench(reconstruction) {
+  const hypotheses = reconstruction.hypotheses || [];
+  if (!hypotheses.length) {
+    return '<div class="sample-detail-defense muted"><strong>hypotheses</strong><div><span>none generated</span></div></div>';
+  }
+
+  return `
+    <section class="hypothesis-workbench">
+      <div class="hypothesis-workbench-title">
+        <strong>Hypothesis workbench</strong>
+        <span>${hypotheses.length} candidate${hypotheses.length === 1 ? "" : "s"}</span>
+      </div>
+      <div class="hypothesis-workbench-grid">
+        ${hypotheses.map((hypothesis) => {
+          const status = hypothesis.selected
+            ? "selected"
+            : hypothesis.accepted
+              ? "accepted"
+              : "rejected";
+          const imageSteps = (hypothesis.image_steps || [])
+            .map((image) => `
+              <figure>
+                <img src="${image.url}" alt="">
+                <figcaption>${escapeHtml(image.step)} · ${escapeHtml(image.label)}</figcaption>
+              </figure>
+            `)
+            .join("");
+          const reasons = (hypothesis.rejection_reasons || [])
+            .map((reason) => `<span>${escapeHtml(reason)}</span>`)
+            .join("");
+          const deltas = Object.entries(hypothesis.topology_delta || {})
+            .map(([key, value]) => (
+              `<span><b>${escapeHtml(key.replaceAll("_", " "))}</b> `
+              + `${escapeHtml(value)}</span>`
+            ))
+            .join("");
+          const chain = hypothesis.defense_chain || [];
+          const chainTags = chain
+            .map((name, index) => `<span>${index + 1}. ${escapeHtml(name)}</span>`)
+            .join("");
+          const parent = hypothesis.debug_reference_hypothesis_id
+            || hypothesis.branch_parent_hypothesis_id
+            || "h0_original";
+          const phaseTags = [
+            `compare: ${hypothesis.debug_reference === "parent_branch" ? "previous phase" : "original"}`,
+            `source: ${parent}`,
+            hypothesis.phase_changed_ink_ratio !== null && hypothesis.phase_changed_ink_ratio !== undefined
+              ? `phase changed: ${formatPercent(hypothesis.phase_changed_ink_ratio)}`
+              : null,
+            hypothesis.phase_added_ink_pixels !== null && hypothesis.phase_added_ink_pixels !== undefined
+              ? `added: ${hypothesis.phase_added_ink_pixels}px`
+              : null,
+            hypothesis.phase_removed_ink_pixels !== null && hypothesis.phase_removed_ink_pixels !== undefined
+              ? `removed: ${hypothesis.phase_removed_ink_pixels}px`
+              : null,
+          ]
+            .filter(Boolean)
+            .map((item) => `<span>${escapeHtml(item)}</span>`)
+            .join("");
+          return `
+            <article class="hypothesis-detail ${status}">
+              <header>
+                <div>
+                  <strong>${escapeHtml(hypothesis.hypothesis_id || "hypothesis")}</strong>
+                  <small>${escapeHtml(hypothesis.defense_name || "unknown defense")}</small>
+                </div>
+                <span>${escapeHtml(shortStageName(hypothesis.stage))} · ${status} · ${formatScore(hypothesis.score)}</span>
+              </header>
+              <div class="hypothesis-detail-images">
+                ${imageSteps || '<div class="process-empty">No images for this hypothesis.</div>'}
+              </div>
+              <div class="hypothesis-detail-row phase">
+                <strong>comparison</strong>
+                <div class="hypothesis-detail-tags">${phaseTags}</div>
+              </div>
+              <div class="hypothesis-detail-row chain">
+                <strong>defense chain</strong>
+                <div class="hypothesis-detail-tags">${chainTags || "<span>no defense chain</span>"}</div>
+              </div>
+              <div class="hypothesis-detail-row">
+                <strong>verifier</strong>
+                <div class="hypothesis-detail-tags">${reasons || "<span>passes verifier</span>"}</div>
+              </div>
+              <div class="hypothesis-detail-row muted">
+                <strong>topology delta</strong>
+                <div class="hypothesis-detail-tags">${deltas || "<span>no topology delta</span>"}</div>
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function sampleResultJsonPath(sample) {
+  const reconstruction = sample.reconstruction_preview || {};
+  return (
+    reconstruction.result_json_path
+    || reconstruction.result_json_url
+    || sample.result_json_path
+    || sample.result_json_url
+    || ""
+  );
 }
 
 function applyPreviewTransform() {
@@ -428,7 +750,7 @@ function renderAristotelPreview(payload) {
         <div class="aristotel-image-pair">
           <figure>
             <img src="${sample.original_url}" alt="">
-            <figcaption>original · ${escapeHtml(sample.label)}</figcaption>
+            <figcaption>thresholded source · ${escapeHtml(sample.label)}</figcaption>
           </figure>
           <figure>
             <img src="${sample.damaged_url}" alt="">
@@ -455,9 +777,17 @@ function renderAristotelPreview(payload) {
         <div class="reconstruction-metrics">
           <span>candidates ${escapeHtml(reconstruction.candidate_count ?? 0)}</span>
           <span>accepted ${escapeHtml(reconstruction.accepted_count ?? 0)}</span>
+          <span>rejected ${escapeHtml(reconstruction.rejected_count ?? 0)}</span>
           <span>${escapeHtml(reconstruction.selected_hypothesis_id || "h0_original")}</span>
           <span>${reconstruction.recognition_bypassed_for_ui ? "RF skipped in UI" : "RF checked"}</span>
         </div>
+        <div class="reconstruction-subtitle">Stage plan</div>
+        ${renderStageTimeline(reconstruction)}
+        <div class="reconstruction-subtitle">Defense tools</div>
+        ${renderDefenseToolSummary(reconstruction)}
+        <div class="reconstruction-subtitle">Generated hypotheses</div>
+        ${renderHypothesisMiniCards(reconstruction)}
+        ${renderLineRemovalSequences(reconstruction, { compact: true })}
         <div class="reconstruction-defense-row">
           <strong>routed</strong>
           ${allowedDefenses || "<span>none</span>"}
@@ -498,11 +828,12 @@ function renderAristotelPreview(payload) {
 
 function sampleDetailImages(sample) {
   const reconstruction = sample.reconstruction_preview || {};
-  const process = reconstruction.process_images || [];
+  const process = (reconstruction.process_images || [])
+    .filter((image) => image.step !== "00_damaged");
   return [
     {
-      step: "original",
-      label: `original · ${sample.label}`,
+      step: "thresholded_source",
+      label: `thresholded source · ${sample.label}`,
       url: sample.original_url,
     },
     {
@@ -600,6 +931,7 @@ function wireSampleDetailZoom() {
 
 function openSampleDetail(sample) {
   const reconstruction = sample.reconstruction_preview || {};
+  const resultJsonPath = sampleResultJsonPath(sample);
   const images = sampleDetailImages(sample);
   const firstImage = images[0] || {};
   const operationChips = (sample.operations || [])
@@ -665,13 +997,33 @@ function openSampleDetail(sample) {
           <strong>routed defenses</strong>
           <div>${routed || "<span>none</span>"}</div>
         </div>
+        <div class="sample-detail-defense">
+          <strong>stage plan</strong>
+          ${renderStageTimeline(reconstruction)}
+        </div>
+        <div class="sample-detail-defense">
+          <strong>tool states</strong>
+          ${renderDefenseToolSummary(reconstruction)}
+        </div>
+        ${renderLineRemovalSequences(reconstruction)}
         <div class="sample-detail-defense muted">
           <strong>unsupported defenses</strong>
           <div>${unsupported || "<span>none</span>"}</div>
         </div>
+        ${renderHypothesisWorkbench(reconstruction)}
         <details class="sample-detail-json" open>
-          <summary>full sample contract</summary>
-          <pre>${escapeHtml(JSON.stringify(sample, null, 2))}</pre>
+          <summary>
+            <span>full sample contract</span>
+            <span class="sample-json-actions">
+              <button
+                class="sample-json-filename-copy"
+                type="button"
+                data-json-filename="${escapeHtml(resultJsonPath)}"
+              >copy json_filename</button>
+              <button class="sample-json-copy" type="button">copy JSON</button>
+            </span>
+          </summary>
+          <pre data-json-copy-source>${escapeHtml(JSON.stringify(sample, null, 2))}</pre>
         </details>
       </section>
     </div>
@@ -687,6 +1039,61 @@ function openSampleDetail(sample) {
       renderSampleDetailHero(image);
     });
   });
+
+  elements.sampleDetailContent.querySelector(".sample-json-copy")?.addEventListener(
+    "click",
+    async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const button = event.currentTarget;
+      const source = elements.sampleDetailContent.querySelector("[data-json-copy-source]");
+      const jsonText = source?.textContent || "";
+
+      if (!jsonText.trim()) {
+        showToast("No JSON found to copy.", true);
+        return;
+      }
+
+      try {
+        await copyTextToClipboard(jsonText);
+        button.textContent = "copied";
+        showToast("Aristotel JSON copied.");
+        window.setTimeout(() => {
+          button.textContent = "copy JSON";
+        }, 1400);
+      } catch (error) {
+        showToast(`Copy failed: ${error.message}`, true);
+      }
+    },
+  );
+
+  elements.sampleDetailContent.querySelector(".sample-json-filename-copy")?.addEventListener(
+    "click",
+    async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const button = event.currentTarget;
+      const filename = button.dataset.jsonFilename || "";
+
+      if (!filename.trim()) {
+        showToast("No JSON filename found to copy.", true);
+        return;
+      }
+
+      try {
+        await copyTextToClipboard(filename);
+        button.textContent = "copied";
+        showToast("JSON filename copied.");
+        window.setTimeout(() => {
+          button.textContent = "copy json_filename";
+        }, 1400);
+      } catch (error) {
+        showToast(`Copy failed: ${error.message}`, true);
+      }
+    },
+  );
 
   resetDetailZoom();
   wireSampleDetailZoom();
@@ -705,7 +1112,9 @@ async function loadAristotelPreview() {
   elements.aristotelSamples.innerHTML = "";
   elements.refreshAristotel.disabled = true;
   try {
-    const payload = await requestJson("/api/aristotel-preview?limit=10");
+    const payload = await requestJson(
+      `/api/aristotel-preview?limit=10&refresh=${Date.now()}`,
+    );
     renderAristotelPreview(payload);
     state.aristotelLoaded = true;
   } catch (error) {
@@ -960,6 +1369,7 @@ document.querySelectorAll(".stage-tab").forEach((button) => {
 });
 
 elements.stopButton.addEventListener("click", stopCommand);
+elements.hardRefreshUi.addEventListener("click", hardRefreshUi);
 elements.refreshArtifacts.addEventListener("click", () => {
   loadOverview({ refreshArtifacts: true });
 });
@@ -1007,7 +1417,7 @@ document.addEventListener("wheel", (event) => {
     event.target instanceof Element ? event.target : event.target.parentElement
   );
   const horizontalStrip = targetElement?.closest(
-    ".reconstruction-process-strip, .aristotel-image-pair, .sample-detail-thumbs",
+    ".reconstruction-process-strip, .stage-timeline, .hypothesis-strip, .hypothesis-detail-images, .line-removal-images, .aristotel-image-pair, .sample-detail-thumbs",
   );
   if (!horizontalStrip) return;
 

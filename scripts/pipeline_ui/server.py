@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import random
 import signal
+import shutil
 import subprocess
 import sys
 import threading
@@ -560,8 +562,336 @@ class PipelineUiApplication:
         relative = candidate.relative_to(self.base_dir).as_posix()
         return "/artifact?path=" + quote(relative, safe="")
 
+    @staticmethod
+    def _first_present(record: dict, keys: tuple[str, ...]) -> str | None:
+        """Return the first non-empty value from a flexible JSON contract."""
+        for key in keys:
+            value = record.get(key)
+            if value:
+                return value
+        return None
+
+    def _reconstruction_hypothesis_preview(
+        self,
+        hypothesis: dict,
+        selected_hypothesis_id: str | None,
+    ) -> dict:
+        """Build UI-ready image and score metadata for one repair hypothesis."""
+        hypothesis_id = hypothesis.get("hypothesis_id")
+        defense_name = hypothesis.get("defense_name") or "unknown_defense"
+        selected = bool(hypothesis_id and hypothesis_id == selected_hypothesis_id)
+        accepted = bool(hypothesis.get("accepted"))
+        score = hypothesis.get("score")
+        rejection_reasons = list(hypothesis.get("rejection_reasons") or [])
+
+        candidate_visual_path = self._first_present(
+            hypothesis,
+            (
+                "candidate_visual_path",
+                "reconstructed_visual_path",
+                "visual_path",
+            ),
+        )
+        candidate_mask_path = self._first_present(
+            hypothesis,
+            (
+                "candidate_mask_path",
+                "reconstructed_mask_path",
+                "mask_path",
+            ),
+        )
+        overlay_path = self._first_present(
+            hypothesis,
+            (
+                "overlay_path",
+                "reconstruction_overlay_path",
+            ),
+        )
+        added_mask_path = hypothesis.get("added_mask_path")
+        removed_mask_path = hypothesis.get("removed_mask_path")
+        metadata = hypothesis.get("metadata") or {}
+        debug_reference = metadata.get("debug_reference") or "original"
+        overlay_label = (
+            "phase overlay vs parent"
+            if debug_reference == "parent_branch"
+            else "overlay vs original"
+        )
+
+        image_steps = []
+        for step, label, path in (
+            ("candidate_visual", "candidate visual", candidate_visual_path),
+            ("overlay", overlay_label, overlay_path),
+            ("added_mask", "phase added ink", added_mask_path),
+            ("removed_mask", "phase removed ink", removed_mask_path),
+        ):
+            url = self._artifact_url_for_path(path)
+            if url:
+                image_steps.append(
+                    {
+                        "step": step,
+                        "label": label,
+                        "url": url,
+                    }
+                )
+
+        return {
+            "hypothesis_id": hypothesis_id,
+            "defense_name": defense_name,
+            "defense_spec": hypothesis.get("defense_spec") or {},
+            "stage": hypothesis.get("stage")
+            or (hypothesis.get("metadata") or {}).get("stage"),
+            "stage_index": hypothesis.get("stage_index")
+            or (hypothesis.get("metadata") or {}).get("stage_index"),
+            "stage_source": hypothesis.get("stage_source")
+            or (hypothesis.get("metadata") or {}).get("stage_source"),
+            "accepted": accepted,
+            "selected": selected,
+            "score": score,
+            "score_breakdown": hypothesis.get("score_breakdown") or {},
+            "rejection_reasons": rejection_reasons,
+            "topology_delta": hypothesis.get("topology_delta") or {},
+            "metadata": metadata,
+            "candidate_visual_path": candidate_visual_path,
+            "candidate_mask_path": candidate_mask_path,
+            "overlay_path": overlay_path,
+            "added_mask_path": added_mask_path,
+            "removed_mask_path": removed_mask_path,
+            "defense_chain": metadata.get("defense_chain") or [defense_name],
+            "branch_state_id": metadata.get("branch_state_id"),
+            "branch_parent_hypothesis_id": metadata.get(
+                "branch_parent_hypothesis_id"
+            ),
+            "debug_reference": debug_reference,
+            "debug_reference_hypothesis_id": metadata.get(
+                "debug_reference_hypothesis_id"
+            ),
+            "phase_changed_ink_ratio": metadata.get("phase_changed_ink_ratio"),
+            "phase_added_ink_pixels": metadata.get("phase_added_ink_pixels"),
+            "phase_removed_ink_pixels": metadata.get("phase_removed_ink_pixels"),
+            "image_steps": image_steps,
+            "primary_image_url": (
+                image_steps[0]["url"]
+                if image_steps
+                else None
+            ),
+        }
+
+    @staticmethod
+    def _reconstruction_tool_summary(
+        reconstruction: dict,
+        hypotheses: list[dict],
+    ) -> list[dict]:
+        """Summarize routed defenses so the UI can show the full tool flow."""
+        allowed = list(reconstruction.get("allowed_defense_types") or [])
+        stage_plan = reconstruction.get("stage_defense_plan") or {}
+        stage_by_defense = {}
+        for stage, defense_names in stage_plan.items():
+            for defense_name in defense_names or []:
+                stage_by_defense.setdefault(defense_name, stage)
+
+        generated_by_defense: dict[str, list[dict]] = {}
+        for hypothesis in hypotheses:
+            generated_by_defense.setdefault(
+                hypothesis.get("defense_name") or "unknown_defense",
+                [],
+            ).append(hypothesis)
+
+        summary = []
+        for defense_name in allowed:
+            candidates = generated_by_defense.get(defense_name, [])
+            accepted_count = sum(1 for item in candidates if item.get("accepted"))
+            selected_count = sum(1 for item in candidates if item.get("selected"))
+            if selected_count:
+                state = "selected"
+            elif accepted_count:
+                state = "accepted"
+            elif candidates:
+                state = "rejected"
+            else:
+                state = "no_candidate"
+            summary.append(
+                {
+                    "defense_name": defense_name,
+                    "stage": (
+                        candidates[0].get("stage")
+                        if candidates
+                        else stage_by_defense.get(defense_name)
+                    ),
+                    "state": state,
+                    "candidate_count": len(candidates),
+                    "accepted_count": accepted_count,
+                    "rejected_count": len(candidates) - accepted_count,
+                    "selected_count": selected_count,
+                }
+            )
+
+        for defense_name, candidates in generated_by_defense.items():
+            if defense_name in allowed:
+                continue
+            accepted_count = sum(1 for item in candidates if item.get("accepted"))
+            selected_count = sum(1 for item in candidates if item.get("selected"))
+            summary.append(
+                {
+                    "defense_name": defense_name,
+                    "stage": (
+                        candidates[0].get("stage")
+                        if candidates
+                        else stage_by_defense.get(defense_name)
+                    ),
+                    "state": "generated_outside_route",
+                    "candidate_count": len(candidates),
+                    "accepted_count": accepted_count,
+                    "rejected_count": len(candidates) - accepted_count,
+                    "selected_count": selected_count,
+                }
+            )
+
+        return summary
+
+    @staticmethod
+    def _picked_reconstruction_chain(
+        hypotheses: list[dict],
+        selected_hypothesis_id: str | None,
+    ) -> list[dict]:
+        """Return the picked cleanup candidate and its best next-phase child."""
+        if not hypotheses:
+            return []
+
+        by_id = {
+            hypothesis.get("hypothesis_id"): hypothesis
+            for hypothesis in hypotheses
+            if hypothesis.get("hypothesis_id")
+        }
+
+        selected = by_id.get(selected_hypothesis_id)
+
+        if selected and selected.get("debug_reference") == "parent_branch":
+            parent_id = (
+                selected.get("debug_reference_hypothesis_id")
+                or selected.get("branch_parent_hypothesis_id")
+            )
+            parent = by_id.get(parent_id)
+            return [item for item in (parent, selected) if item]
+
+        cleanup_candidates = [
+            hypothesis
+            for hypothesis in hypotheses
+            if (
+                hypothesis.get("metadata", {}).get("creates_branch_state")
+                or hypothesis.get("metadata", {}).get("reconstruction_role")
+                == "cleanup_branch_seed"
+            )
+        ]
+
+        if selected in cleanup_candidates:
+            cleanup = selected
+        else:
+            cleanup_candidates.sort(
+                key=lambda item: (
+                    bool(item.get("accepted")),
+                    float(item.get("score") or 0.0),
+                    str(item.get("hypothesis_id") or ""),
+                ),
+                reverse=True,
+            )
+            cleanup = cleanup_candidates[0] if cleanup_candidates else selected
+
+        if not cleanup:
+            return []
+
+        cleanup_id = cleanup.get("hypothesis_id")
+        children = [
+            hypothesis
+            for hypothesis in hypotheses
+            if (
+                hypothesis.get("debug_reference_hypothesis_id") == cleanup_id
+                or hypothesis.get("branch_parent_hypothesis_id") == cleanup_id
+            )
+        ]
+        children.sort(
+            key=lambda item: (
+                bool(item.get("accepted")),
+                float(item.get("score") or 0.0),
+                str(item.get("hypothesis_id") or ""),
+            ),
+            reverse=True,
+        )
+
+        return [cleanup] + children[:1]
+
+    @staticmethod
+    def _line_removal_sequences(hypotheses: list[dict]) -> list[dict]:
+        """Build line-removal plus bridge sequences for UI mask comparison."""
+        cleanup_candidates = [
+            hypothesis
+            for hypothesis in hypotheses
+            if hypothesis.get("defense_name") == "linear_artifact_removal"
+        ]
+        cleanup_candidates.sort(
+            key=lambda item: (
+                bool(item.get("selected")),
+                bool(item.get("accepted")),
+                float(item.get("score") or 0.0),
+                str(item.get("hypothesis_id") or ""),
+            ),
+            reverse=True,
+        )
+
+        sequences = []
+        for cleanup in cleanup_candidates:
+            cleanup_id = cleanup.get("hypothesis_id")
+            bridge_candidates = [
+                hypothesis
+                for hypothesis in hypotheses
+                if (
+                    hypothesis.get("defense_name") == "endpoint_bridge"
+                    and (
+                        hypothesis.get("debug_reference_hypothesis_id") == cleanup_id
+                        or hypothesis.get("branch_parent_hypothesis_id") == cleanup_id
+                    )
+                )
+            ]
+            bridge_candidates.sort(
+                key=lambda item: (
+                    bool(item.get("selected")),
+                    bool(item.get("accepted")),
+                    float(item.get("score") or 0.0),
+                    str(item.get("hypothesis_id") or ""),
+                ),
+                reverse=True,
+            )
+            bridge = bridge_candidates[0] if bridge_candidates else None
+
+            images = []
+            seen_urls = set()
+            for role, hypothesis in (("line cut", cleanup), ("bridge", bridge)):
+                if not hypothesis:
+                    continue
+                for image in hypothesis.get("image_steps") or []:
+                    url = image.get("url")
+                    if not url or url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    images.append(
+                        {
+                            "step": image.get("step"),
+                            "label": f"{role}: {image.get('label') or image.get('step')}",
+                            "url": url,
+                        }
+                    )
+
+            sequences.append(
+                {
+                    "cleanup": cleanup,
+                    "bridge": bridge,
+                    "images": images,
+                }
+            )
+
+        return sequences
+
     def _aristotel_source_inputs(self, limit: int):
-        """Yield the first deterministic glyph records without scanning all data."""
+        """Return random glyph records for Aristotel Lab inspection."""
         scripts_dir = str(self.scripts_dir)
         if scripts_dir not in sys.path:
             sys.path.insert(0, scripts_dir)
@@ -573,14 +903,14 @@ class PipelineUiApplication:
         if not self.aristotel_input_dir.is_dir():
             return []
 
-        inputs = []
+        candidates = []
         for class_folder in sorted(self.aristotel_input_dir.iterdir()):
             if not class_folder.is_dir():
                 continue
             for image_path in sorted(class_folder.iterdir()):
                 if image_path.suffix.lower() not in IMAGE_EXTENSIONS:
                     continue
-                inputs.append(
+                candidates.append(
                     TeacherInput(
                         image_path=image_path,
                         label=class_folder.name,
@@ -593,9 +923,11 @@ class PipelineUiApplication:
                         },
                     )
                 )
-                if len(inputs) >= limit:
-                    return inputs
-        return inputs
+
+        if len(candidates) <= limit:
+            return candidates
+
+        return random.SystemRandom().sample(candidates, limit)
 
     @staticmethod
     def _aristotel_defense_preview(sample) -> dict:
@@ -617,7 +949,7 @@ class PipelineUiApplication:
 
         return {
             "engine": "theoretical_reconstruction",
-            "currently_available_tool": "endpoint_bridge",
+            "currently_available_tool": "routed_defense_registry",
             "expected_action": expected_action,
             "training_label": sample.trust_label,
             "cycle": list(ARISTOTEL_RECONSTRUCTION_CYCLE),
@@ -667,7 +999,7 @@ class PipelineUiApplication:
             "maximum_component_count_for_full_trace": 50,
             "minimum_trace_path_points": 4,
             "reconstruction_use_recognition_verification": False,
-            "reconstruction_max_hypotheses": 5,
+            "reconstruction_max_hypotheses": 16,
             "reconstruction_max_accepted": 3,
         }
 
@@ -679,25 +1011,66 @@ class PipelineUiApplication:
             reconstruction_module.predict_rf_candidates = original_predictor
 
         reconstruction = trace_result.reconstruction or {}
-        selected_path = reconstruction.get("selected_reconstructed_mask_path")
         selected_hypothesis_id = reconstruction.get("selected_hypothesis_id")
-        selected_hypothesis = None
-        for hypothesis in reconstruction.get("hypotheses", []):
-            if hypothesis.get("hypothesis_id") == selected_hypothesis_id:
-                selected_hypothesis = hypothesis
-                break
-        selected_hypothesis = selected_hypothesis or (
-            reconstruction.get("hypotheses", [None])[0]
-            if reconstruction.get("hypotheses")
-            else None
+        hypotheses = [
+            self._reconstruction_hypothesis_preview(
+                hypothesis,
+                selected_hypothesis_id,
+            )
+            for hypothesis in reconstruction.get("hypotheses", [])
+        ]
+        selected_hypothesis = next(
+            (
+                hypothesis
+                for hypothesis in hypotheses
+                if hypothesis.get("selected")
+            ),
+            None,
         )
-        overlay_path = (
-            selected_hypothesis.get("reconstruction_overlay_path")
-            if selected_hypothesis
-            else None
+        picked_reconstruction_chain = self._picked_reconstruction_chain(
+            hypotheses,
+            selected_hypothesis_id,
         )
-        after_url = self._artifact_url_for_path(selected_path)
-        overlay_url = self._artifact_url_for_path(overlay_path)
+        line_removal_sequences = self._line_removal_sequences(hypotheses)
+        selected_visual_path = self._first_present(
+            reconstruction,
+            (
+                "selected_visual_path",
+                "selected_reconstructed_visual_path",
+                "selected_mask_path",
+                "selected_reconstructed_mask_path",
+            ),
+        )
+        selected_mask_path = self._first_present(
+            reconstruction,
+            (
+                "selected_mask_path",
+                "selected_reconstructed_mask_path",
+            ),
+        )
+        selected_overlay_path = self._first_present(
+            reconstruction,
+            (
+                "selected_overlay_path",
+                "selected_reconstruction_overlay_path",
+            ),
+        )
+        if selected_hypothesis:
+            selected_visual_path = selected_visual_path or self._first_present(
+                selected_hypothesis,
+                ("candidate_visual_path",),
+            )
+            selected_overlay_path = (
+                selected_overlay_path
+                or selected_hypothesis.get("overlay_path")
+            )
+        selected_overlay_caption = "reconstruction overlay"
+        if selected_hypothesis and selected_hypothesis.get("debug_reference") == "parent_branch":
+            selected_overlay_caption = "selected phase overlay vs parent"
+        after_url = self._artifact_url_for_path(selected_visual_path)
+        if not after_url:
+            after_url = self._artifact_url_for_path(selected_mask_path)
+        overlay_url = self._artifact_url_for_path(selected_overlay_path)
         process_images = [
             {
                 "step": "00_damaged",
@@ -705,6 +1078,25 @@ class PipelineUiApplication:
                 "url": self._artifact_url_for_path(damaged_path),
             }
         ]
+        process_image_urls = {
+            image["url"]
+            for image in process_images
+            if image.get("url")
+        }
+
+        def append_process_image(step: str, label: str, path: str | None) -> None:
+            url = self._artifact_url_for_path(path)
+            if not url or url in process_image_urls:
+                return
+            process_image_urls.add(url)
+            process_images.append(
+                {
+                    "step": step,
+                    "label": label,
+                    "url": url,
+                }
+            )
+
         debug_steps = (
             ("01_components", "component debug", "component_debug_image"),
             ("02_skeleton", "skeleton", "skeleton_debug_image"),
@@ -713,30 +1105,36 @@ class PipelineUiApplication:
             ("05_landmarks", "landmarks", "landmarks_debug_image"),
         )
         for step, label, key in debug_steps:
-            url = self._artifact_url_for_path(trace_result.debug_paths.get(key))
-            if url:
-                process_images.append(
-                    {
-                        "step": step,
-                        "label": label,
-                        "url": url,
-                    }
-                )
+            append_process_image(step, label, trace_result.debug_paths.get(key))
+
+        for index, hypothesis in enumerate(picked_reconstruction_chain, start=1):
+            phase_label = (
+                f"picked phase {index}: "
+                f"{hypothesis.get('defense_name') or 'repair'}"
+            )
+            append_process_image(
+                f"06_phase_{index}_candidate",
+                phase_label,
+                hypothesis.get("candidate_visual_path")
+                or hypothesis.get("candidate_mask_path"),
+            )
+            append_process_image(
+                f"06_phase_{index}_overlay",
+                f"{phase_label} overlay",
+                hypothesis.get("overlay_path"),
+            )
+
         if after_url:
-            process_images.append(
-                {
-                    "step": "06_reconstructed",
-                    "label": "selected reconstruction",
-                    "url": after_url,
-                }
+            append_process_image(
+                "07_reconstructed",
+                "selected reconstruction",
+                selected_visual_path or selected_mask_path,
             )
         if overlay_url:
-            process_images.append(
-                {
-                    "step": "07_overlay",
-                    "label": "reconstruction overlay",
-                    "url": overlay_url,
-                }
+            append_process_image(
+                "08_overlay",
+                selected_overlay_caption,
+                selected_overlay_path,
             )
 
         return {
@@ -754,6 +1152,11 @@ class PipelineUiApplication:
             ),
             "candidate_count": reconstruction.get("candidate_count", 0),
             "accepted_count": reconstruction.get("accepted_count", 0),
+            "rejected_count": max(
+                0,
+                int(reconstruction.get("candidate_count", 0))
+                - int(reconstruction.get("accepted_count", 0)),
+            ),
             "allowed_defense_types": reconstruction.get(
                 "allowed_defense_types",
                 [],
@@ -766,6 +1169,22 @@ class PipelineUiApplication:
                 "unsupported_defense_types",
                 [],
             ),
+            "no_candidate_defense_types": reconstruction.get(
+                "no_candidate_defense_types",
+                [],
+            ),
+            "stage_defense_plan": reconstruction.get(
+                "stage_defense_plan",
+                {},
+            ),
+            "stage_records": reconstruction.get(
+                "stage_records",
+                [],
+            ),
+            "tool_summary": self._reconstruction_tool_summary(
+                reconstruction,
+                hypotheses,
+            ),
             "damage_reasons": (
                 reconstruction.get("diagnosis", {}).get("damage_reasons", [])
             ),
@@ -777,12 +1196,15 @@ class PipelineUiApplication:
                 else "kept damaged mask"
             ),
             "overlay_caption": (
-                "green added / red removed"
+                selected_overlay_caption
                 if overlay_url
                 else "no overlay emitted"
             ),
             "process_images": process_images,
-            "hypotheses": reconstruction.get("hypotheses", []),
+            "picked_reconstruction_chain": picked_reconstruction_chain,
+            "line_removal_sequences": line_removal_sequences,
+            "hypotheses": hypotheses,
+            "raw_reconstruction": reconstruction,
         }
 
     def aristotel_preview(self, limit: int = 10) -> dict:
@@ -813,6 +1235,10 @@ class PipelineUiApplication:
             }
 
         sample_dir = self.aristotel_preview_dir / "samples"
+        reconstruction_dir = self.aristotel_preview_dir / "reconstruction"
+        for generated_dir in (sample_dir, reconstruction_dir):
+            if generated_dir.is_dir():
+                shutil.rmtree(generated_dir)
         sample_dir.mkdir(parents=True, exist_ok=True)
         corrupter = FileCorrupter(recipes=recipes, seed=404)
         samples = []
@@ -822,6 +1248,17 @@ class PipelineUiApplication:
                 index = len(samples) + 1
                 label = self._safe_preview_name(sample.teacher_input.label)
                 recipe = self._safe_preview_name(sample.damage_recipe)
+                thresholded_source = corrupter.load_image(
+                    sample.teacher_input.image_path
+                )
+                thresholded_name = (
+                    f"{index:02d}_{label}_00_thresholded_source.png"
+                )
+                thresholded_path = sample_dir / thresholded_name
+                if not cv2.imwrite(str(thresholded_path), thresholded_source):
+                    raise RuntimeError(
+                        f"Could not save thresholded preview: {thresholded_path}"
+                    )
                 output_name = (
                     f"{index:02d}_{label}_{recipe}_{sample.sample_id}.png"
                 )
@@ -829,8 +1266,8 @@ class PipelineUiApplication:
                 if not cv2.imwrite(str(output_path), sample.image):
                     raise RuntimeError(f"Could not save preview: {output_path}")
 
-                original_path = sample.teacher_input.image_path.resolve()
-                original_relative = original_path.relative_to(
+                raw_source_path = sample.teacher_input.image_path.resolve()
+                thresholded_relative = thresholded_path.relative_to(
                     self.base_dir
                 ).as_posix()
                 damaged_relative = output_path.relative_to(
@@ -857,11 +1294,19 @@ class PipelineUiApplication:
                         "changed_pixel_count": sample.changed_pixel_count,
                         "changed_pixel_ratio": sample.changed_pixel_ratio,
                         "operations": sample.operations,
-                        "original_path": str(original_path),
+                        "raw_source_path": str(raw_source_path),
+                        "original_path": str(thresholded_path.resolve()),
+                        "thresholded_source_path": str(
+                            thresholded_path.resolve()
+                        ),
                         "damaged_path": str(output_path.resolve()),
                         "original_url": (
                             "/artifact?path="
-                            + quote(original_relative, safe="")
+                            + quote(thresholded_relative, safe="")
+                        ),
+                        "thresholded_source_url": (
+                            "/artifact?path="
+                            + quote(thresholded_relative, safe="")
                         ),
                         "damaged_url": (
                             "/artifact?path="
