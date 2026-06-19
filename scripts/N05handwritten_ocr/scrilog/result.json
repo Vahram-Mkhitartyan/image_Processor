@@ -1,0 +1,611 @@
+{
+  "unit_id": "02_4_light_blur",
+  "selected_hypothesis_id": "h0_original",
+  "scrilog_version": "0.1-monster",
+  "signature": {
+    "unit_id": "02_4_light_blur",
+    "selected_hypothesis_id": "h0_original",
+    "loop_count": 0,
+    "endpoint_count": 4,
+    "junction_count": 2,
+    "path_count": 5,
+    "component_count": 1,
+    "width": 23.0,
+    "height": 28.0,
+    "aspect_ratio": 0.8214285714285714,
+    "ink_pixels": 210,
+    "has_ascender": false,
+    "has_descender": false,
+    "has_left_exit": true,
+    "has_right_exit": true,
+    "has_top_contact": false,
+    "has_bottom_contact": false,
+    "endpoint_zones": {},
+    "junction_zones": {},
+    "loop_zones": {},
+    "direction_ratios": {
+      "horizontal": 0.49999999999999994,
+      "vertical": 0.3461538461538461,
+      "diagonal": 0.15384615384615383,
+      "left": 0.4444444444444444,
+      "right": 0.2777777777777778,
+      "up": 0.09722222222222222,
+      "down": 0.4027777777777778
+    },
+    "reconstruction_phase": 0,
+    "line_removal_applied": false,
+    "downstream_bridge_required": false,
+    "downstream_bridge_completed": false,
+    "bridge_state": "not_required",
+    "source_kind": "analysis_mask",
+    "raw_keys_seen": [
+      "abs_net_dx_sum",
+      "abs_net_dy_sum",
+      "accepted",
+      "accepted_component_count",
+      "accepted_count",
+      "accepted_hypothesis_ids",
+      "accepted_ink_pixel_count",
+      "active_feature_source",
+      "active_feature_vector_promoted",
+      "allowed_defense_types",
+      "attached_loop_count",
+      "bottom_valley_count",
+      "candidate_count",
+      "clockwise_turn_count",
+      "clockwise_turn_ratio",
+      "closed_loop_count",
+      "component_count",
+      "components",
+      "condition",
+      "condition_verdict",
+      "counterclockwise_turn_count",
+      "counterclockwise_turn_ratio",
+      "crossing_number_histogram",
+      "damage_verdict",
+      "debug_dir",
+      "debug_paths",
+      "defense_name",
+      "diagonal_step_count",
+      "diagonal_step_ratio",
+      "direction_change_count",
+      "direction_changes_per_path",
+      "down_step_count",
+      "down_step_ratio",
+      "edge_count",
+      "enabled",
+      "endpoint_bottom_half_ratio",
+      "endpoint_count",
+      "endpoint_horizontal_spread_ratio",
+      "endpoint_left_half_ratio",
+      "endpoint_mean_x_in_bbox",
+      "endpoint_mean_y_in_bbox",
+      "endpoint_right_half_ratio",
+      "endpoint_top_half_ratio",
+      "endpoint_vertical_spread_ratio",
+      "error",
+      "evaluated_candidate_count",
+      "expert_name",
+      "fallback_used",
+      "feature_vector",
+      "global_bottom_count",
+      "global_left_count",
+      "global_right_count",
+      "global_top_count",
+      "hole_area_sum",
+      "hole_area_to_bbox_ratio",
+      "hole_area_to_ink_ratio",
+      "hole_mean_x_in_bbox",
+      "hole_mean_y_in_bbox",
+      "horizontal_direction_change_count",
+      "horizontal_direction_changes_per_path",
+      "hypotheses",
+      "hypothesis_id",
+      "implemented_defense_types",
+      "ink_bbox_area",
+      "ink_bbox_aspect_ratio",
+      "ink_bbox_fill_ratio",
+      "ink_bbox_height",
+      "ink_bbox_width",
+      "ink_bottom_edge_ratio",
+      "ink_bottom_half_ratio",
+      "ink_bottom_left_quadrant_ratio",
+      "ink_bottom_right_quadrant_ratio",
+      "ink_center_band_ratio",
+      "ink_centroid_dx_from_center",
+      "ink_centroid_dy_from_center",
+      "ink_centroid_x_in_bbox",
+      "ink_centroid_y_in_bbox",
+      "ink_hole_component_count",
+      "ink_hole_component_ids",
+      "ink_hole_count",
+      "ink_hole_match_count",
+      "ink_hole_matches",
+      "ink_holes",
+      "ink_left_edge_ratio",
+      "ink_left_half_ratio",
+      "ink_left_right_balance",
+      "ink_right_edge_ratio",
+      "ink_right_half_ratio",
+      "ink_top_bottom_balance",
+      "ink_top_edge_ratio",
+      "ink_top_half_ratio",
+      "ink_top_left_quadrant_ratio",
+      "ink_top_right_quadrant_ratio",
+      "isolated_point_count",
+      "junction_cluster_count",
+      "junction_pixel_count",
+      "junctions_per_path",
+      "known_damage_recipes",
+      "label",
+      "landmark_count",
+      "landmark_type_counts",
+      "landmarks",
+      "left_step_count",
+      "left_step_ratio",
+      "left_turn_count",
+      "length_per_ink_pixel",
+      "mask_path",
+      "mask_repair",
+      "max_component_area",
+      "max_direction_entropy",
+      "max_hole_area",
+      "max_path_bbox_area_ratio",
+      "max_path_length",
+      "mean_component_area",
+      "mean_component_density",
+      "mean_direction_entropy",
+      "mean_path_bbox_area_ratio",
+      "mean_path_bbox_aspect_ratio",
+      "mean_path_bbox_height",
+      "mean_path_bbox_width",
+      "mean_path_length",
+      "mean_path_straightness",
+      "merged_path_count",
+      "merged_source_path_count",
+      "metrics",
+      "min_path_length",
+      "ml_features",
+      "net_dx_sum",
+      "net_dy_sum",
+      "no_candidate_defense_types",
+      "original_hypothesis",
+      "output_dir",
+      "overlay_path",
+      "path_count",
+      "path_lengths",
+      "path_point_count",
+      "peaks_per_path",
+      "point_count",
+      "quality_flags",
+      "raw_component_count",
+      "raw_ink_pixel_count",
+      "raw_path_count",
+      "reason",
+      "recognition",
+      "reconstruction",
+      "rejected_small_component_count",
+      "requested_threshold_mode",
+      "result_json_path",
+      "right_step_count",
+      "right_step_ratio",
+      "right_turn_count",
+      "route_source",
+      "routing_advice",
+      "schema_version",
+      "selected",
+      "selected_feature_source",
+      "selected_feature_vector",
+      "selected_hypothesis_id",
+      "selected_mask_path",
+      "selected_overlay_path",
+      "selected_visual_path",
+      "sequence",
+      "sequence_string",
+      "settings",
+      "short_path_count",
+      "skeleton_graph",
+      "skeleton_point_count",
+      "source_path",
+      "source_type",
+      "stage_defense_plan",
+      "stage_records",
+      "status",
+      "step_count",
+      "threshold_mode",
+      "top_peak_count",
+      "topology",
+      "topology_diagnosis",
+      "total_candidate_count",
+      "total_ink_pixels",
+      "total_path_length",
+      "trace_input",
+      "trace_paths",
+      "unmatched_ink_hole_count",
+      "unsupported_defense_types",
+      "up_step_count",
+      "up_step_ratio",
+      "valleys_per_path",
+      "version",
+      "vertical_direction_change_count",
+      "vertical_direction_changes_per_path",
+      "visual_path"
+    ]
+  },
+  "facts": [
+    "aspect_ratio(0.8214)",
+    "bridge_state(not_required)",
+    "component_count(1)",
+    "direction_ratio(diagonal, 0.1538)",
+    "direction_ratio(down, 0.4028)",
+    "direction_ratio(horizontal, 0.5000)",
+    "direction_ratio(left, 0.4444)",
+    "direction_ratio(right, 0.2778)",
+    "direction_ratio(up, 0.0972)",
+    "direction_ratio(vertical, 0.3462)",
+    "endpoint_count(4)",
+    "family(branched)",
+    "family(compact)",
+    "family(connected_cursive_like)",
+    "family(horizontal_dominant)",
+    "family(left_exit)",
+    "family(midline_compact)",
+    "family(no_loop)",
+    "family(right_exit)",
+    "family(two_sided_exit)",
+    "has_left_exit",
+    "has_measured(endpoint)",
+    "has_measured(junction)",
+    "has_right_exit",
+    "has_structure(junction)",
+    "height(28.00)",
+    "ink_pixels(210)",
+    "junction_count(2)",
+    "loop_count(0)",
+    "path_count(5)",
+    "selected_hypothesis(h0_original)",
+    "source_kind(analysis_mask)",
+    "unit(02_4_light_blur)",
+    "width(23.00)"
+  ],
+  "fact_details": [
+    {
+      "predicate": "aspect_ratio",
+      "args": [
+        "0.8214"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "aspect_ratio(0.8214)"
+    },
+    {
+      "predicate": "bridge_state",
+      "args": [
+        "not_required"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "bridge_state(not_required)"
+    },
+    {
+      "predicate": "component_count",
+      "args": [
+        "1"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "component_count(1)"
+    },
+    {
+      "predicate": "direction_ratio",
+      "args": [
+        "diagonal",
+        "0.1538"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "direction_ratio(diagonal, 0.1538)"
+    },
+    {
+      "predicate": "direction_ratio",
+      "args": [
+        "down",
+        "0.4028"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "direction_ratio(down, 0.4028)"
+    },
+    {
+      "predicate": "direction_ratio",
+      "args": [
+        "horizontal",
+        "0.5000"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "direction_ratio(horizontal, 0.5000)"
+    },
+    {
+      "predicate": "direction_ratio",
+      "args": [
+        "left",
+        "0.4444"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "direction_ratio(left, 0.4444)"
+    },
+    {
+      "predicate": "direction_ratio",
+      "args": [
+        "right",
+        "0.2778"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "direction_ratio(right, 0.2778)"
+    },
+    {
+      "predicate": "direction_ratio",
+      "args": [
+        "up",
+        "0.0972"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "direction_ratio(up, 0.0972)"
+    },
+    {
+      "predicate": "direction_ratio",
+      "args": [
+        "vertical",
+        "0.3462"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "direction_ratio(vertical, 0.3462)"
+    },
+    {
+      "predicate": "endpoint_count",
+      "args": [
+        "4"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "endpoint_count(4)"
+    },
+    {
+      "predicate": "family",
+      "args": [
+        "branched"
+      ],
+      "weight": 1.0,
+      "origin": "rule:family_branched",
+      "text": "family(branched)"
+    },
+    {
+      "predicate": "family",
+      "args": [
+        "compact"
+      ],
+      "weight": 1.0,
+      "origin": "rule:family_compact",
+      "text": "family(compact)"
+    },
+    {
+      "predicate": "family",
+      "args": [
+        "connected_cursive_like"
+      ],
+      "weight": 1.0,
+      "origin": "rule:combined_connected_cursive_like",
+      "text": "family(connected_cursive_like)"
+    },
+    {
+      "predicate": "family",
+      "args": [
+        "horizontal_dominant"
+      ],
+      "weight": 1.0,
+      "origin": "rule:family_horizontal_dominant",
+      "text": "family(horizontal_dominant)"
+    },
+    {
+      "predicate": "family",
+      "args": [
+        "left_exit"
+      ],
+      "weight": 1.0,
+      "origin": "rule:family_left_exit",
+      "text": "family(left_exit)"
+    },
+    {
+      "predicate": "family",
+      "args": [
+        "midline_compact"
+      ],
+      "weight": 1.0,
+      "origin": "rule:family_midline_compact",
+      "text": "family(midline_compact)"
+    },
+    {
+      "predicate": "family",
+      "args": [
+        "no_loop"
+      ],
+      "weight": 1.0,
+      "origin": "rule:family_no_loop",
+      "text": "family(no_loop)"
+    },
+    {
+      "predicate": "family",
+      "args": [
+        "right_exit"
+      ],
+      "weight": 1.0,
+      "origin": "rule:family_right_exit",
+      "text": "family(right_exit)"
+    },
+    {
+      "predicate": "family",
+      "args": [
+        "two_sided_exit"
+      ],
+      "weight": 1.0,
+      "origin": "rule:family_two_sided_exit",
+      "text": "family(two_sided_exit)"
+    },
+    {
+      "predicate": "has_left_exit",
+      "args": [],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "has_left_exit"
+    },
+    {
+      "predicate": "has_measured",
+      "args": [
+        "endpoint"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "has_measured(endpoint)"
+    },
+    {
+      "predicate": "has_measured",
+      "args": [
+        "junction"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "has_measured(junction)"
+    },
+    {
+      "predicate": "has_right_exit",
+      "args": [],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "has_right_exit"
+    },
+    {
+      "predicate": "has_structure",
+      "args": [
+        "junction"
+      ],
+      "weight": 1.0,
+      "origin": "rule:family_branched",
+      "text": "has_structure(junction)"
+    },
+    {
+      "predicate": "height",
+      "args": [
+        "28.00"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "height(28.00)"
+    },
+    {
+      "predicate": "ink_pixels",
+      "args": [
+        "210"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "ink_pixels(210)"
+    },
+    {
+      "predicate": "junction_count",
+      "args": [
+        "2"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "junction_count(2)"
+    },
+    {
+      "predicate": "loop_count",
+      "args": [
+        "0"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "loop_count(0)"
+    },
+    {
+      "predicate": "path_count",
+      "args": [
+        "5"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "path_count(5)"
+    },
+    {
+      "predicate": "selected_hypothesis",
+      "args": [
+        "h0_original"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "selected_hypothesis(h0_original)"
+    },
+    {
+      "predicate": "source_kind",
+      "args": [
+        "analysis_mask"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "source_kind(analysis_mask)"
+    },
+    {
+      "predicate": "unit",
+      "args": [
+        "02_4_light_blur"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "unit(02_4_light_blur)"
+    },
+    {
+      "predicate": "width",
+      "args": [
+        "23.00"
+      ],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "width(23.00)"
+    }
+  ],
+  "derived_families": [
+    "branched",
+    "compact",
+    "connected_cursive_like",
+    "horizontal_dominant",
+    "left_exit",
+    "midline_compact",
+    "no_loop",
+    "right_exit",
+    "two_sided_exit"
+  ],
+  "warnings": [],
+  "candidate_effects": [],
+  "boosted_candidates": [],
+  "blocked_candidates": [],
+  "weakened_candidates": [],
+  "explanation": [
+    "Derived structural families: branched, compact, connected_cursive_like, horizontal_dominant, left_exit, midline_compact, no_loop, right_exit, two_sided_exit."
+  ],
+  "status": {
+    "has_warnings": false,
+    "has_candidate_effects": false,
+    "is_structurally_unsafe": false
+  },
+  "engine": {
+    "passes": 2,
+    "rule_fire_count": 18,
+    "fact_count": 34
+  }
+}
