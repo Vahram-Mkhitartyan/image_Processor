@@ -453,6 +453,13 @@ class TraceResult:
                 self.reconstruction
                 and self.reconstruction.get("accepted_hypothesis_ids")
             ),
+            "active_feature_source": self.metrics.get(
+                "active_feature_source",
+                "original",
+            ),
+            "uses_reconstructed_features": (
+                self.metrics.get("active_feature_source") == "reconstructed"
+            ),
         }
 
         return {

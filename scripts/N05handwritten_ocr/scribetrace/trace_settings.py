@@ -24,7 +24,6 @@ class TraceSettings:
         local_extrema_min_spacing=3,
         enable_theoretical_reconstruction=False,
         reconstruction_max_hypotheses=5,
-        reconstruction_max_accepted=3,
         reconstruction_max_bridge_length_px=12.0,
         reconstruction_max_bridge_angle_degrees=45.0,
         reconstruction_tangent_points=4,
@@ -65,7 +64,6 @@ class TraceSettings:
         self.reconstruction_max_hypotheses = int(
             reconstruction_max_hypotheses
         )
-        self.reconstruction_max_accepted = int(reconstruction_max_accepted)
         self.reconstruction_max_bridge_length_px = float(
             reconstruction_max_bridge_length_px
         )
@@ -138,10 +136,6 @@ class TraceSettings:
             reconstruction_max_hypotheses=settings.get(
                 "reconstruction_max_hypotheses",
                 5,
-            ),
-            reconstruction_max_accepted=settings.get(
-                "reconstruction_max_accepted",
-                3,
             ),
             reconstruction_max_bridge_length_px=settings.get(
                 "reconstruction_max_bridge_length_px",
@@ -228,13 +222,6 @@ class TraceSettings:
             raise ValueError("local_extrema_min_spacing must be at least 1.")
         if self.reconstruction_max_hypotheses < 1:
             raise ValueError("reconstruction_max_hypotheses must be at least 1.")
-        if self.reconstruction_max_accepted < 1:
-            raise ValueError("reconstruction_max_accepted must be at least 1.")
-        if self.reconstruction_max_accepted > self.reconstruction_max_hypotheses:
-            raise ValueError(
-                "reconstruction_max_accepted cannot exceed "
-                "reconstruction_max_hypotheses."
-            )
         if self.reconstruction_max_bridge_length_px <= 0:
             raise ValueError(
                 "reconstruction_max_bridge_length_px must be positive."
@@ -298,8 +285,6 @@ class TraceSettings:
                 self.enable_theoretical_reconstruction,
             "reconstruction_max_hypotheses":
                 self.reconstruction_max_hypotheses,
-            "reconstruction_max_accepted":
-                self.reconstruction_max_accepted,
             "reconstruction_max_bridge_length_px":
                 self.reconstruction_max_bridge_length_px,
             "reconstruction_max_bridge_angle_degrees":

@@ -31,6 +31,7 @@ from .trace_defense_registry import (
     implemented_in_trace_defenses,
 )
 from .trace_defenses import DefenseHypothesis, generate_defense_hypotheses
+from .trace_debug import TraceDebugWriter
 from .trace_features import TraceFeatureEncoder
 from .trace_inference import predict_rf_candidates
 from .trace_masks import InkComponentExtractor, InkHoleDetector
@@ -730,9 +731,10 @@ class TheoreticalReconstructor:
             if candidate_record["accepted"]
         ]
         accepted.sort(key=lambda item: item["score"], reverse=True)
-        accepted = accepted[: int(self.settings.reconstruction_max_accepted)]
 
         selected = accepted[0] if accepted else None
+        if selected is not None:
+            selected["selected"] = True
 
         result = {
             "version": "scribetrace_reconstruction_v3",
@@ -1807,6 +1809,7 @@ class TheoreticalReconstructor:
         paths = self._save_candidate_debug(
             hypothesis=hypothesis,
             original_mask=original_mask,
+            candidate_trace=candidate_trace,
             output_dir=output_dir,
             stable_unit_id=stable_unit_id,
             selected=False,
@@ -1844,6 +1847,10 @@ class TheoreticalReconstructor:
             "added_mask_path": paths["added_mask_path"],
             "removed_mask_path": paths["removed_mask_path"],
             "overlay_path": paths["overlay_path"],
+            "retrace_skeleton_path": paths["retrace_skeleton_path"],
+            "retrace_graph_path": paths["retrace_graph_path"],
+            "retrace_paths_path": paths["retrace_paths_path"],
+            "retrace_landmarks_path": paths["retrace_landmarks_path"],
             "feature_vector": (
                 candidate_result.feature_vector.to_dict()
                 if candidate_result.feature_vector is not None
@@ -2180,6 +2187,7 @@ class TheoreticalReconstructor:
         *,
         hypothesis,
         original_mask,
+        candidate_trace,
         output_dir,
         stable_unit_id,
         selected=False,
@@ -2195,6 +2203,22 @@ class TheoreticalReconstructor:
         added_mask_path = os.path.join(candidates_dir, f"{prefix}_added.png")
         removed_mask_path = os.path.join(candidates_dir, f"{prefix}_removed.png")
         overlay_path = os.path.join(candidates_dir, f"{prefix}_overlay.png")
+        retrace_skeleton_path = os.path.join(
+            candidates_dir,
+            f"{prefix}_retrace_skeleton.png",
+        )
+        retrace_graph_path = os.path.join(
+            candidates_dir,
+            f"{prefix}_retrace_graph.png",
+        )
+        retrace_paths_path = os.path.join(
+            candidates_dir,
+            f"{prefix}_retrace_paths.png",
+        )
+        retrace_landmarks_path = os.path.join(
+            candidates_dir,
+            f"{prefix}_retrace_landmarks.png",
+        )
 
         candidate_mask = _as_binary_mask(hypothesis.candidate_mask)
         added_mask = _as_binary_mask(hypothesis.added_mask)
@@ -2212,12 +2236,49 @@ class TheoreticalReconstructor:
             self._make_overlay(reference_mask, candidate_mask),
         )
 
+        saved_retrace_paths = {
+            "retrace_skeleton_path": None,
+            "retrace_graph_path": None,
+            "retrace_paths_path": None,
+            "retrace_landmarks_path": None,
+        }
+        if self.settings.save_debug:
+            debug_writer = TraceDebugWriter(self.settings)
+            skeleton = candidate_trace["skeleton"]
+            graph = candidate_trace["graph"]
+            trace_paths = candidate_trace["paths"]
+            landmarks = candidate_trace["result"].landmarks
+            debug_writer.save_skeleton_debug(skeleton, retrace_skeleton_path)
+            debug_writer.save_skeleton_graph_debug(
+                skeleton,
+                graph,
+                retrace_graph_path,
+            )
+            debug_writer.save_trace_paths_debug(
+                skeleton,
+                trace_paths,
+                retrace_paths_path,
+            )
+            debug_writer.save_landmarks_debug(
+                skeleton,
+                trace_paths,
+                landmarks,
+                retrace_landmarks_path,
+            )
+            saved_retrace_paths = {
+                "retrace_skeleton_path": retrace_skeleton_path,
+                "retrace_graph_path": retrace_graph_path,
+                "retrace_paths_path": retrace_paths_path,
+                "retrace_landmarks_path": retrace_landmarks_path,
+            }
+
         return {
             "candidate_mask_path": candidate_mask_path,
             "candidate_visual_path": candidate_visual_path,
             "added_mask_path": added_mask_path,
             "removed_mask_path": removed_mask_path,
             "overlay_path": overlay_path,
+            **saved_retrace_paths,
         }
 
     def _make_overlay(self, original_mask, candidate_mask):

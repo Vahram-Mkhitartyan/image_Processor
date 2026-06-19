@@ -177,6 +177,56 @@ def _finalize_trace_result(trace_result, output_dir, stable_unit_id):
     return trace_result
 
 
+def _promote_selected_reconstruction_features(trace_result):
+    """Make the selected reconstructed geometry the active ML feature vector."""
+    reconstruction = trace_result.reconstruction or {}
+    selected_source = reconstruction.get("selected_feature_source", "original")
+
+    if selected_source != "reconstructed":
+        reconstruction["active_feature_source"] = "original"
+        reconstruction["active_feature_vector_promoted"] = False
+        trace_result.metrics["active_feature_source"] = "original"
+        return trace_result
+
+    selected = reconstruction.get("selected_feature_vector")
+    if not isinstance(selected, dict):
+        raise ValueError(
+            "Reconstruction selected reconstructed features without a feature vector."
+        )
+
+    feature_names = list(selected.get("feature_names") or [])
+    vector = list(selected.get("vector") or [])
+    if not feature_names or len(feature_names) != len(vector):
+        raise ValueError(
+            "Selected reconstruction feature names and values are missing or misaligned."
+        )
+
+    original_names = (
+        trace_result.feature_vector.feature_names
+        if trace_result.feature_vector is not None
+        else []
+    )
+    if original_names and feature_names != original_names:
+        raise ValueError(
+            "Selected reconstruction feature schema differs from the original schema."
+        )
+
+    sequence = list(selected.get("sequence") or [])
+    trace_result.feature_vector = TraceFeatureVector(
+        vector=vector,
+        feature_names=feature_names,
+        sequence=sequence,
+        sequence_string=(
+            selected.get("sequence_string")
+            or " ".join(str(token) for token in sequence)
+        ),
+    )
+    reconstruction["active_feature_source"] = "reconstructed"
+    reconstruction["active_feature_vector_promoted"] = True
+    trace_result.metrics["active_feature_source"] = "reconstructed"
+    return trace_result
+
+
 def run_scribetrace(trace_input, settings=None):
     """Produce filtered component, skeleton, graph, path, and ML evidence."""
     if trace_input is None:
@@ -399,6 +449,7 @@ def run_scribetrace(trace_input, settings=None):
                 0,
             ),
         }
+        _promote_selected_reconstruction_features(trace_result)
         return _finalize_trace_result(
             trace_result,
             output_dir,

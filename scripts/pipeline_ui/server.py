@@ -609,6 +609,10 @@ class PipelineUiApplication:
         )
         added_mask_path = hypothesis.get("added_mask_path")
         removed_mask_path = hypothesis.get("removed_mask_path")
+        retrace_skeleton_path = hypothesis.get("retrace_skeleton_path")
+        retrace_graph_path = hypothesis.get("retrace_graph_path")
+        retrace_paths_path = hypothesis.get("retrace_paths_path")
+        retrace_landmarks_path = hypothesis.get("retrace_landmarks_path")
         metadata = hypothesis.get("metadata") or {}
         debug_reference = metadata.get("debug_reference") or "original"
         overlay_label = (
@@ -620,6 +624,10 @@ class PipelineUiApplication:
         image_steps = []
         for step, label, path in (
             ("candidate_visual", "candidate visual", candidate_visual_path),
+            ("retrace_graph", "reconstructed skeleton graph", retrace_graph_path),
+            ("retrace_landmarks", "reconstructed landmarks", retrace_landmarks_path),
+            ("retrace_paths", "reconstructed trace paths", retrace_paths_path),
+            ("retrace_skeleton", "reconstructed skeleton", retrace_skeleton_path),
             ("overlay", overlay_label, overlay_path),
             ("added_mask", "phase added ink", added_mask_path),
             ("removed_mask", "phase removed ink", removed_mask_path),
@@ -656,6 +664,10 @@ class PipelineUiApplication:
             "overlay_path": overlay_path,
             "added_mask_path": added_mask_path,
             "removed_mask_path": removed_mask_path,
+            "retrace_skeleton_path": retrace_skeleton_path,
+            "retrace_graph_path": retrace_graph_path,
+            "retrace_paths_path": retrace_paths_path,
+            "retrace_landmarks_path": retrace_landmarks_path,
             "defense_chain": metadata.get("defense_chain") or [defense_name],
             "branch_state_id": metadata.get("branch_state_id"),
             "branch_parent_hypothesis_id": metadata.get(
@@ -1000,7 +1012,6 @@ class PipelineUiApplication:
             "minimum_trace_path_points": 4,
             "reconstruction_use_recognition_verification": False,
             "reconstruction_max_hypotheses": 16,
-            "reconstruction_max_accepted": 3,
         }
 
         original_predictor = reconstruction_module.predict_rf_candidates
@@ -1118,6 +1129,27 @@ class PipelineUiApplication:
                 hypothesis.get("candidate_visual_path")
                 or hypothesis.get("candidate_mask_path"),
             )
+            if hypothesis.get("selected"):
+                append_process_image(
+                    f"06_phase_{index}_retrace_graph",
+                    f"{phase_label}: retraced graph",
+                    hypothesis.get("retrace_graph_path"),
+                )
+                append_process_image(
+                    f"06_phase_{index}_retrace_landmarks",
+                    f"{phase_label}: retraced landmarks",
+                    hypothesis.get("retrace_landmarks_path"),
+                )
+                append_process_image(
+                    f"06_phase_{index}_retrace_paths",
+                    f"{phase_label}: retraced paths",
+                    hypothesis.get("retrace_paths_path"),
+                )
+                append_process_image(
+                    f"06_phase_{index}_retrace_skeleton",
+                    f"{phase_label}: retraced skeleton",
+                    hypothesis.get("retrace_skeleton_path"),
+                )
             append_process_image(
                 f"06_phase_{index}_overlay",
                 f"{phase_label} overlay",

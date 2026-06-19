@@ -28,7 +28,13 @@
       "light_cut",
       "light_blur",
       "scanner_noise",
-      "light_erosion"
+      "light_erosion",
+      "stamp_interference",
+      "bleed_through",
+      "edge_crop_loss",
+      "threshold_failure",
+      "compression_artifacts",
+      "ink_overlap"
     ]
   },
   "scribetrace": {

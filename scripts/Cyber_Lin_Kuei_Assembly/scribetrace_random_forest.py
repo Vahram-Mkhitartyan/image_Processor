@@ -780,11 +780,18 @@ def trace_one_mask(
     run_scribetrace,
 ):
     """Extract one feature row from a temporary normalized mask."""
+    damage_recipe = sample_metadata.get("damage_recipe")
+    known_damage_recipes = (
+        [str(damage_recipe)]
+        if damage_recipe
+        else (["clean"] if sample_metadata.get("sample_kind") == "clean" else [])
+    )
     trace_input = TraceInput(
         mask_crop_path=str(mask_path),
         document_id="matenadata_v4",
         text_unit_id=str(sample_metadata["sample_id"]),
         layer="aristotel_training",
+        known_damage_recipes=known_damage_recipes,
     )
     result = run_scribetrace(trace_input, settings=SCRIBETRACE_SETTINGS)
     evidence = result.to_dict()
@@ -909,6 +916,7 @@ def export_scribetrace_v4_dataset(limit_per_class=None):
     feature_schema = None
     sample_kind_counts = Counter()
     recipe_counts = Counter()
+    active_feature_source_counts = Counter()
 
     print("=" * 70)
     print(f"Exporting ScribeTrace v4 dataset from {len(selected)} source glyphs")
@@ -1054,6 +1062,14 @@ def export_scribetrace_v4_dataset(limit_per_class=None):
                     exported_count += 1
                     sample_kind_counts[row["sample_kind"]] += 1
                     recipe_counts[str(row["damage_recipe"])] += 1
+                    active_feature_source_counts[
+                        str(
+                            row.get("quality_flags", {}).get(
+                                "active_feature_source",
+                                "unknown",
+                            )
+                        )
+                    ] += 1
 
                 if source_index % 250 == 0:
                     print(
@@ -1075,6 +1091,7 @@ def export_scribetrace_v4_dataset(limit_per_class=None):
         "degradation_epochs": epochs,
         "sample_kind_counts": dict(sample_kind_counts),
         "recipe_counts": dict(recipe_counts),
+        "active_feature_source_counts": dict(active_feature_source_counts),
         "selected_class_counts": dict(selected_counts),
         "raw_class_counts": dict(class_counts),
         "feature_schema": feature_schema,
