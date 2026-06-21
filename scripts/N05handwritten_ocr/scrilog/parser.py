@@ -175,31 +175,7 @@ class ScriLogParser:
                 origin="signature",
             )
 
-        # Extension/contact facts
-        if signature.has_ascender:
-            facts.add(
-                "has_ascender",
-                origin="signature",
-            )
-
-        if signature.has_descender:
-            facts.add(
-                "has_descender",
-                origin="signature",
-            )
-
-        if signature.has_left_exit:
-            facts.add(
-                "has_left_exit",
-                origin="signature",
-            )
-
-        if signature.has_right_exit:
-            facts.add(
-                "has_right_exit",
-                origin="signature",
-            )
-
+        # Objective border-contact facts
         if signature.has_top_contact:
             facts.add(
                 "has_top_contact",

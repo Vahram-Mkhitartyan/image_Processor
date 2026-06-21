@@ -17,9 +17,9 @@ class ScriLogCandidateEffect:
     This is for later N05 fusion.
 
     Examples:
-        boost("ա") because looped_right_exit matched
-        block("թ") because no ascender exists
-        weaken("գ") because descender mismatch
+        boost("ա") because looped structure matched
+        block("թ") because required junction evidence is absent
+        weaken("գ") because endpoint topology differs
 
     For v0.1, this may stay empty until we add Armenian class profiles.
     """

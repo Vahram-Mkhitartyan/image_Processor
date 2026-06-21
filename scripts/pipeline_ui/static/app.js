@@ -9,6 +9,11 @@ const state = {
   aristotelLoaded: false,
   aristotelSamples: [],
   trainingLoaded: false,
+  scrilogLoaded: false,
+  scrilogWorkspace: null,
+  scrilogIndex: 0,
+  scrilogClassFilter: "",
+  scrilogDirty: false,
   activeView: "artifact-trace",
   previewZoom: 1,
   previewPanX: 0,
@@ -58,6 +63,27 @@ const elements = {
   toast: document.querySelector("#toast"),
   refreshTraining: document.querySelector("#refresh-training"),
   runMinosTraining: document.querySelector("#run-minos-training"),
+  scrilogClassBadge: document.querySelector("#scrilog-class-badge"),
+  scrilogClassFilter: document.querySelector("#scrilog-class-filter"),
+  scrilogExport: document.querySelector("#scrilog-export"),
+  scrilogFields: document.querySelector("#scrilog-fields"),
+  scrilogImage: document.querySelector("#scrilog-image"),
+  scrilogImageName: document.querySelector("#scrilog-image-name"),
+  scrilogIndex: document.querySelector("#scrilog-index"),
+  scrilogNext: document.querySelector("#scrilog-next"),
+  scrilogNotes: document.querySelector("#scrilog-notes"),
+  scrilogOutputPath: document.querySelector("#scrilog-output-path"),
+  scrilogPrevious: document.querySelector("#scrilog-previous"),
+  scrilogReset: document.querySelector("#scrilog-reset"),
+  scrilogSave: document.querySelector("#scrilog-save"),
+  scrilogSaveNext: document.querySelector("#scrilog-save-next"),
+  scrilogSaveState: document.querySelector("#scrilog-save-state"),
+  scrilogSavedCount: document.querySelector("#scrilog-saved-count"),
+  scrilogSidebarExport: document.querySelector("#scrilog-sidebar-export"),
+  scrilogSidebarSave: document.querySelector("#scrilog-sidebar-save"),
+  scrilogSourceId: document.querySelector("#scrilog-source-id"),
+  scrilogStatus: document.querySelector("#scrilog-status"),
+  scrilogTotal: document.querySelector("#scrilog-total"),
   traceTitle: document.querySelector("#trace-title"),
   trainingRuns: document.querySelector("#training-runs"),
   trainingSummary: document.querySelector("#training-summary"),
@@ -220,6 +246,9 @@ function setWorkspaceView(viewId) {
     elements.aristotelSummary.textContent = (
       "Press Inspect 10 samples to generate a fresh teacher preview."
     );
+  }
+  if (viewId === "scrilog-lab" && !state.scrilogLoaded) {
+    loadScrilogWorkspace(0);
   }
 }
 
@@ -1151,6 +1180,202 @@ function buildPolyline(history, key, width, height, padding, maxValue) {
   return points.join(" ");
 }
 
+function setScrilogDirty(isDirty) {
+  state.scrilogDirty = isDirty;
+  if (!elements.scrilogSaveState) return;
+  elements.scrilogSaveState.textContent = isDirty ? "UNSAVED CHANGES" : "SAVED";
+  elements.scrilogSaveState.classList.toggle("dirty", isDirty);
+}
+
+function scrilogDefaultValue(field) {
+  return field.type === "bool" ? false : 0;
+}
+
+function renderScrilogFields(schema, values = {}) {
+  elements.scrilogFields.innerHTML = "";
+  let activeGroup = "";
+  schema.forEach((field) => {
+    if (field.group && field.group !== activeGroup) {
+      activeGroup = field.group;
+      const heading = document.createElement("div");
+      heading.className = "scrilog-field-group";
+      heading.textContent = activeGroup;
+      elements.scrilogFields.appendChild(heading);
+    }
+    const wrapper = document.createElement("div");
+    wrapper.className = `scrilog-field scrilog-field-${field.type}`;
+    const value = values[field.name] ?? scrilogDefaultValue(field);
+
+    if (field.type === "bool") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `scrilog-toggle ${value ? "active" : ""}`;
+      button.dataset.field = field.name;
+      button.dataset.value = value ? "true" : "false";
+      button.setAttribute("aria-pressed", value ? "true" : "false");
+      button.innerHTML = `
+        <span>${escapeHtml(field.label)} <em class="importance-${escapeHtml(field.importance)}">${escapeHtml(field.importance)}</em></span>
+        <strong>${value ? "ON" : "OFF"}</strong>
+      `;
+      button.addEventListener("click", () => {
+        const nextValue = button.dataset.value !== "true";
+        button.dataset.value = nextValue ? "true" : "false";
+        button.setAttribute("aria-pressed", nextValue ? "true" : "false");
+        button.classList.toggle("active", nextValue);
+        button.querySelector("strong").textContent = nextValue ? "ON" : "OFF";
+        setScrilogDirty(true);
+      });
+      wrapper.appendChild(button);
+    } else {
+      const label = document.createElement("label");
+      label.innerHTML = `<span>${escapeHtml(field.label)} <em class="importance-${escapeHtml(field.importance)}">${escapeHtml(field.importance)}</em></span>`;
+      const input = document.createElement("input");
+      input.type = "number";
+      input.dataset.field = field.name;
+      input.value = value;
+      input.min = field.min ?? 0;
+      input.max = field.max ?? 1000000;
+      input.step = 1;
+      input.placeholder = "0";
+      input.addEventListener("input", () => setScrilogDirty(true));
+      label.appendChild(input);
+      wrapper.appendChild(label);
+    }
+    elements.scrilogFields.appendChild(wrapper);
+  });
+}
+
+function collectScrilogValues() {
+  const values = {};
+  elements.scrilogFields.querySelectorAll("[data-field]").forEach((control) => {
+    values[control.dataset.field] = control.classList.contains("scrilog-toggle")
+      ? control.dataset.value === "true"
+      : Number.parseInt(control.value || "0", 10);
+  });
+  return values;
+}
+
+function renderScrilogWorkspace(payload) {
+  state.scrilogWorkspace = payload;
+  state.scrilogLoaded = true;
+  elements.scrilogSavedCount.textContent = payload.annotation_count || 0;
+  elements.scrilogOutputPath.textContent = payload.output_path || "ScriLog output unavailable";
+
+  if (payload.status !== "completed" || !payload.sample) {
+    elements.scrilogStatus.textContent = "No Matenadata glyphs found for this selection.";
+    elements.scrilogImage.removeAttribute("src");
+    elements.scrilogFields.innerHTML = "";
+    return;
+  }
+
+  if (elements.scrilogClassFilter.options.length <= 1) {
+    payload.class_labels.forEach((classLabel) => {
+      const option = document.createElement("option");
+      option.value = classLabel;
+      option.textContent = `Class ${classLabel}`;
+      elements.scrilogClassFilter.appendChild(option);
+    });
+  }
+  elements.scrilogClassFilter.value = payload.class_filter || "";
+  state.scrilogIndex = payload.index;
+  state.scrilogClassFilter = payload.class_filter || "";
+
+  const annotation = payload.sample.annotation || {};
+  elements.scrilogIndex.value = payload.index + 1;
+  elements.scrilogIndex.max = payload.total;
+  elements.scrilogTotal.textContent = `/ ${payload.total.toLocaleString()}`;
+  elements.scrilogPrevious.disabled = payload.index <= 0;
+  elements.scrilogNext.disabled = payload.index >= payload.total - 1;
+  elements.scrilogClassBadge.textContent = `CLASS ${payload.sample.class_label}`;
+  elements.scrilogSourceId.textContent = payload.sample.source_id;
+  elements.scrilogImageName.textContent = payload.sample.image_name;
+  elements.scrilogImage.src = payload.sample.url;
+  elements.scrilogNotes.value = annotation.notes || "";
+  renderScrilogFields(payload.schema, annotation.expected_signature || {});
+  elements.scrilogStatus.textContent = (
+    `Glyph ${payload.index + 1} of ${payload.total.toLocaleString()} · `
+    + `${payload.annotation_count.toLocaleString()} annotations saved · `
+    + `${payload.global_total.toLocaleString()} total source glyphs`
+  );
+  setScrilogDirty(false);
+  elements.scrilogSaveState.textContent = annotation.contract_status === "needs_spatial_review"
+    ? "REVIEW SPATIAL FIELDS"
+    : annotation.expected_signature ? "SAVED" : "NEW";
+  elements.scrilogSaveState.classList.toggle(
+    "dirty",
+    annotation.contract_status === "needs_spatial_review",
+  );
+}
+
+async function loadScrilogWorkspace(index = state.scrilogIndex) {
+  elements.scrilogStatus.textContent = "Reading the Matenadata sequence...";
+  const params = new URLSearchParams({
+    index: Math.max(0, index).toString(),
+    class: state.scrilogClassFilter,
+  });
+  try {
+    renderScrilogWorkspace(await requestJson(`/api/scrilog-workspace?${params}`));
+  } catch (error) {
+    elements.scrilogStatus.textContent = error.message;
+    showToast(error.message, true);
+  }
+}
+
+async function saveScrilogAnnotation({ advanceClass = false } = {}) {
+  const sample = state.scrilogWorkspace?.sample;
+  if (!sample) return;
+  try {
+    const result = await requestJson("/api/scrilog-annotation", {
+      method: "POST",
+      body: JSON.stringify({
+        source_id: sample.source_id,
+        values: collectScrilogValues(),
+        notes: elements.scrilogNotes.value,
+      }),
+    });
+    elements.scrilogSavedCount.textContent = result.annotation_count;
+    setScrilogDirty(false);
+    showToast(`ScriLog saved ${sample.source_id}`);
+    if (advanceClass) {
+      const classLabels = state.scrilogWorkspace.class_labels || [];
+      const currentClass = sample.class_label;
+      const currentClassIndex = classLabels.indexOf(currentClass);
+      const nextClass = classLabels[currentClassIndex + 1];
+      if (nextClass !== undefined) {
+        state.scrilogClassFilter = nextClass;
+        elements.scrilogClassFilter.value = nextClass;
+        await loadScrilogWorkspace(0);
+      } else {
+        showToast("Last ScriLog class reached.");
+      }
+    }
+  } catch (error) {
+    elements.scrilogStatus.textContent = `Save failed: ${error.message}`;
+    showToast(error.message, true);
+  }
+}
+
+async function exportScrilogJson() {
+  try {
+    const payload = await requestJson("/api/scrilog-export");
+    const blob = new Blob(
+      [JSON.stringify(payload, null, 2) + "\n"],
+      { type: "application/json" },
+    );
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "scrilog_annotations.json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast("ScriLog JSON exported.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
 function renderTrainingChart(history) {
   if (!history?.length) {
     return '<div class="training-chart-empty">No epoch history saved yet.</div>';
@@ -1376,6 +1601,30 @@ elements.refreshArtifacts.addEventListener("click", () => {
 elements.refreshAristotel.addEventListener("click", loadAristotelPreview);
 elements.refreshTraining.addEventListener("click", loadTrainingOverview);
 elements.runMinosTraining.addEventListener("click", () => runCommand("train"));
+elements.scrilogPrevious.addEventListener("click", () => {
+  loadScrilogWorkspace(state.scrilogIndex - 1);
+});
+elements.scrilogNext.addEventListener("click", () => {
+  loadScrilogWorkspace(state.scrilogIndex + 1);
+});
+elements.scrilogIndex.addEventListener("change", () => {
+  loadScrilogWorkspace(Math.max(0, Number.parseInt(elements.scrilogIndex.value || "1", 10) - 1));
+});
+elements.scrilogClassFilter.addEventListener("change", () => {
+  state.scrilogClassFilter = elements.scrilogClassFilter.value;
+  loadScrilogWorkspace(0);
+});
+elements.scrilogSave.addEventListener("click", () => saveScrilogAnnotation());
+elements.scrilogSaveNext.addEventListener("click", () => saveScrilogAnnotation({ advanceClass: true }));
+elements.scrilogSidebarSave.addEventListener("click", () => saveScrilogAnnotation());
+elements.scrilogExport.addEventListener("click", exportScrilogJson);
+elements.scrilogSidebarExport.addEventListener("click", exportScrilogJson);
+elements.scrilogReset.addEventListener("click", () => {
+  renderScrilogFields(state.scrilogWorkspace?.schema || [], {});
+  elements.scrilogNotes.value = "";
+  setScrilogDirty(true);
+});
+elements.scrilogNotes.addEventListener("input", () => setScrilogDirty(true));
 elements.sampleDetailBackdrop.addEventListener("click", closeSampleDetail);
 elements.sampleDetailClose.addEventListener("click", closeSampleDetail);
 document.addEventListener("keydown", (event) => {

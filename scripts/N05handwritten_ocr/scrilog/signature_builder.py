@@ -58,6 +58,7 @@ class ScriLogSignatureBuilder(ScriLogSignatureExtractors):
             topology=topology,
             vectors=vectors,
             preferred_keys=[
+                "endpoint_quadrants",
                 "endpoint_zones",
                 "endpoint_zone_counts",
                 "endpoints_by_zone",
@@ -71,6 +72,7 @@ class ScriLogSignatureBuilder(ScriLogSignatureExtractors):
             topology=topology,
             vectors=vectors,
             preferred_keys=[
+                "junction_quadrants",
                 "junction_zones",
                 "junction_zone_counts",
                 "junctions_by_zone",
@@ -234,19 +236,7 @@ class ScriLogSignatureBuilder(ScriLogSignatureExtractors):
             )
         )
 
-        (
-            has_ascender,
-            has_descender,
-            has_left_exit,
-            has_right_exit,
-            has_top_contact,
-            has_bottom_contact,
-        ) = self._infer_bool_structure(
-            merged,
-            endpoint_zones,
-            junction_zones,
-            loop_zones,
-        )
+        has_top_contact, has_bottom_contact = self._infer_border_contacts(merged)
 
         source_kind = str(
             _first_present(
@@ -283,12 +273,6 @@ class ScriLogSignatureBuilder(ScriLogSignatureExtractors):
             height=height,
             aspect_ratio=aspect_ratio,
             ink_pixels=ink_pixels,
-
-            has_ascender=has_ascender,
-            has_descender=has_descender,
-
-            has_left_exit=has_left_exit,
-            has_right_exit=has_right_exit,
 
             has_top_contact=has_top_contact,
             has_bottom_contact=has_bottom_contact,

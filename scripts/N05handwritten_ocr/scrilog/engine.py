@@ -103,8 +103,8 @@ class ScriLogEngine:
             -> family(looped)
 
         Pass 2:
-            family(looped) + family(right_exit)
-            -> family(looped_right_exit)
+            family(looped) + family(branched)
+            -> family(complex_loop_branch_endpoint)
 
         Pass 3:
             no new facts

@@ -20,7 +20,6 @@ class ScriLogSignature:
             - this glyph has 1 loop
             - 2 endpoints
             - 0 junctions
-            - right-side exit
             - selected reconstruction phase = 2
 
         ScriLogSignature stores those measured facts.
@@ -59,12 +58,6 @@ class ScriLogSignature:
     # --------------------------------------------------------
     # Structural flags
     # --------------------------------------------------------
-
-    has_ascender: bool = False
-    has_descender: bool = False
-
-    has_left_exit: bool = False
-    has_right_exit: bool = False
 
     has_top_contact: bool = False
     has_bottom_contact: bool = False
@@ -166,12 +159,6 @@ class ScriLogSignature:
             "aspect_ratio": self.aspect_ratio,
             "ink_pixels": self.ink_pixels,
 
-            "has_ascender": self.has_ascender,
-            "has_descender": self.has_descender,
-
-            "has_left_exit": self.has_left_exit,
-            "has_right_exit": self.has_right_exit,
-
             "has_top_contact": self.has_top_contact,
             "has_bottom_contact": self.has_bottom_contact,
 
@@ -191,4 +178,3 @@ class ScriLogSignature:
             "source_kind": self.source_kind,
             "raw_keys_seen": list(self.raw_keys_seen),
         }
-

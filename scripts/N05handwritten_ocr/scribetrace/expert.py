@@ -21,7 +21,7 @@ from .trace_common import (
     sanitize_identifier,
 )
 from .trace_debug import TraceDebugWriter
-from .trace_features import TraceFeatureEncoder
+from .trace_features import TraceFeatureEncoder, build_scrilog_observation
 from .trace_inference import load_rf_model, predict_rf_candidates
 from .trace_masks import (
     InkComponentExtractor,
@@ -370,6 +370,13 @@ def run_scribetrace(trace_input, settings=None):
                 "unmatched_ink_hole_count": len(ink_holes) - len(ink_hole_matches),
                 "ink_hole_matches": ink_hole_matches,
             }
+        )
+        metrics["scrilog_observation"] = build_scrilog_observation(
+            components=components,
+            skeleton_graph=skeleton_graph,
+            trace_paths=trace_paths,
+            ink_holes=ink_holes,
+            mask_shape=component_analysis["cleaned_mask"].shape,
         )
         feature_vector = TraceFeatureEncoder(trace_settings).encode(
             components=components,

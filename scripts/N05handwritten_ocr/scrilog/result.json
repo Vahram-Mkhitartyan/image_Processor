@@ -1,38 +1,34 @@
 {
-  "unit_id": "02_4_light_blur",
-  "selected_hypothesis_id": "h0_original",
+  "unit_id": "01_42_light_cut",
+  "selected_hypothesis_id": "h6_vertical_gap_closing",
   "scrilog_version": "0.1-monster",
   "signature": {
-    "unit_id": "02_4_light_blur",
-    "selected_hypothesis_id": "h0_original",
-    "loop_count": 0,
-    "endpoint_count": 4,
-    "junction_count": 2,
+    "unit_id": "01_42_light_cut",
+    "selected_hypothesis_id": "h6_vertical_gap_closing",
+    "loop_count": 1,
+    "endpoint_count": 3,
+    "junction_count": 3,
     "path_count": 5,
     "component_count": 1,
-    "width": 23.0,
-    "height": 28.0,
-    "aspect_ratio": 0.8214285714285714,
-    "ink_pixels": 210,
-    "has_ascender": false,
-    "has_descender": false,
-    "has_left_exit": true,
-    "has_right_exit": true,
+    "width": 30.0,
+    "height": 34.0,
+    "aspect_ratio": 0.8823529411764706,
+    "ink_pixels": 194,
     "has_top_contact": false,
     "has_bottom_contact": false,
     "endpoint_zones": {},
     "junction_zones": {},
     "loop_zones": {},
     "direction_ratios": {
-      "horizontal": 0.49999999999999994,
-      "vertical": 0.3461538461538461,
-      "diagonal": 0.15384615384615383,
-      "left": 0.4444444444444444,
-      "right": 0.2777777777777778,
-      "up": 0.09722222222222222,
-      "down": 0.4027777777777778
+      "horizontal": 0.3904761904761905,
+      "vertical": 0.4952380952380952,
+      "diagonal": 0.11428571428571428,
+      "left": 0.37037037037037035,
+      "right": 0.13580246913580246,
+      "up": 0.25925925925925924,
+      "down": 0.38271604938271603
     },
-    "reconstruction_phase": 0,
+    "reconstruction_phase": 1,
     "line_removal_applied": false,
     "downstream_bridge_required": false,
     "downstream_bridge_completed": false,
@@ -48,10 +44,18 @@
       "accepted_ink_pixel_count",
       "active_feature_source",
       "active_feature_vector_promoted",
+      "added_ink_pixels",
+      "added_ink_ratio",
+      "added_mask_path",
       "allowed_defense_types",
       "attached_loop_count",
       "bottom_valley_count",
+      "branch_state_id",
       "candidate_count",
+      "candidate_mask_path",
+      "candidate_visual_path",
+      "changed_ink_pixels",
+      "changed_ink_ratio",
       "clockwise_turn_count",
       "clockwise_turn_ratio",
       "closed_loop_count",
@@ -65,7 +69,9 @@
       "damage_verdict",
       "debug_dir",
       "debug_paths",
+      "defense_chain",
       "defense_name",
+      "defense_spec",
       "diagonal_step_count",
       "diagonal_step_ratio",
       "direction_change_count",
@@ -88,6 +94,7 @@
       "expert_name",
       "fallback_used",
       "feature_vector",
+      "geometry_score",
       "global_bottom_count",
       "global_left_count",
       "global_right_count",
@@ -145,7 +152,6 @@
       "left_step_ratio",
       "left_turn_count",
       "length_per_ink_pixel",
-      "mask_path",
       "mask_repair",
       "max_component_area",
       "max_direction_entropy",
@@ -163,6 +169,7 @@
       "mean_path_straightness",
       "merged_path_count",
       "merged_source_path_count",
+      "metadata",
       "metrics",
       "min_path_length",
       "ml_features",
@@ -185,14 +192,26 @@
       "recognition",
       "reconstruction",
       "rejected_small_component_count",
+      "rejection_reasons",
+      "removed_ink_pixels",
+      "removed_ink_ratio",
+      "removed_mask_path",
       "requested_threshold_mode",
       "result_json_path",
+      "retrace_graph_path",
+      "retrace_landmarks_path",
+      "retrace_paths_path",
+      "retrace_skeleton_path",
       "right_step_count",
       "right_step_ratio",
       "right_turn_count",
       "route_source",
       "routing_advice",
       "schema_version",
+      "score",
+      "score_breakdown",
+      "scoring_against_branch_parent",
+      "scoring_topology_delta",
       "selected",
       "selected_feature_source",
       "selected_feature_vector",
@@ -206,15 +225,21 @@
       "short_path_count",
       "skeleton_graph",
       "skeleton_point_count",
+      "source",
       "source_path",
       "source_type",
+      "stable_unit_id",
+      "stage",
       "stage_defense_plan",
+      "stage_index",
       "stage_records",
+      "stage_source",
       "status",
       "step_count",
       "threshold_mode",
       "top_peak_count",
       "topology",
+      "topology_delta",
       "topology_diagnosis",
       "total_candidate_count",
       "total_ink_pixels",
@@ -229,54 +254,54 @@
       "version",
       "vertical_direction_change_count",
       "vertical_direction_changes_per_path",
-      "visual_path"
+      "vertical_gap_confidence",
+      "vertical_gap_kernel_height",
+      "vertical_gap_policy"
     ]
   },
   "facts": [
-    "aspect_ratio(0.8214)",
+    "aspect_ratio(0.8824)",
     "bridge_state(not_required)",
     "component_count(1)",
-    "direction_ratio(diagonal, 0.1538)",
-    "direction_ratio(down, 0.4028)",
-    "direction_ratio(horizontal, 0.5000)",
-    "direction_ratio(left, 0.4444)",
-    "direction_ratio(right, 0.2778)",
-    "direction_ratio(up, 0.0972)",
-    "direction_ratio(vertical, 0.3462)",
-    "endpoint_count(4)",
+    "direction_ratio(diagonal, 0.1143)",
+    "direction_ratio(down, 0.3827)",
+    "direction_ratio(horizontal, 0.3905)",
+    "direction_ratio(left, 0.3704)",
+    "direction_ratio(right, 0.1358)",
+    "direction_ratio(up, 0.2593)",
+    "direction_ratio(vertical, 0.4952)",
+    "endpoint_count(3)",
     "family(branched)",
     "family(compact)",
-    "family(connected_cursive_like)",
-    "family(horizontal_dominant)",
-    "family(left_exit)",
-    "family(midline_compact)",
-    "family(no_loop)",
-    "family(right_exit)",
-    "family(two_sided_exit)",
-    "has_left_exit",
+    "family(complex_loop_branch_endpoint)",
+    "family(looped)",
+    "family(vertical_dominant)",
     "has_measured(endpoint)",
     "has_measured(junction)",
-    "has_right_exit",
+    "has_measured(loop)",
     "has_structure(junction)",
-    "height(28.00)",
-    "ink_pixels(210)",
-    "junction_count(2)",
-    "loop_count(0)",
+    "has_structure(loop)",
+    "height(34.00)",
+    "history(reconstructed)",
+    "ink_pixels(194)",
+    "is_reconstructed",
+    "junction_count(3)",
+    "loop_count(1)",
     "path_count(5)",
-    "selected_hypothesis(h0_original)",
+    "selected_hypothesis(h6_vertical_gap_closing)",
     "source_kind(analysis_mask)",
-    "unit(02_4_light_blur)",
-    "width(23.00)"
+    "unit(01_42_light_cut)",
+    "width(30.00)"
   ],
   "fact_details": [
     {
       "predicate": "aspect_ratio",
       "args": [
-        "0.8214"
+        "0.8824"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "aspect_ratio(0.8214)"
+      "text": "aspect_ratio(0.8824)"
     },
     {
       "predicate": "bridge_state",
@@ -300,80 +325,80 @@
       "predicate": "direction_ratio",
       "args": [
         "diagonal",
-        "0.1538"
+        "0.1143"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "direction_ratio(diagonal, 0.1538)"
+      "text": "direction_ratio(diagonal, 0.1143)"
     },
     {
       "predicate": "direction_ratio",
       "args": [
         "down",
-        "0.4028"
+        "0.3827"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "direction_ratio(down, 0.4028)"
+      "text": "direction_ratio(down, 0.3827)"
     },
     {
       "predicate": "direction_ratio",
       "args": [
         "horizontal",
-        "0.5000"
+        "0.3905"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "direction_ratio(horizontal, 0.5000)"
+      "text": "direction_ratio(horizontal, 0.3905)"
     },
     {
       "predicate": "direction_ratio",
       "args": [
         "left",
-        "0.4444"
+        "0.3704"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "direction_ratio(left, 0.4444)"
+      "text": "direction_ratio(left, 0.3704)"
     },
     {
       "predicate": "direction_ratio",
       "args": [
         "right",
-        "0.2778"
+        "0.1358"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "direction_ratio(right, 0.2778)"
+      "text": "direction_ratio(right, 0.1358)"
     },
     {
       "predicate": "direction_ratio",
       "args": [
         "up",
-        "0.0972"
+        "0.2593"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "direction_ratio(up, 0.0972)"
+      "text": "direction_ratio(up, 0.2593)"
     },
     {
       "predicate": "direction_ratio",
       "args": [
         "vertical",
-        "0.3462"
+        "0.4952"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "direction_ratio(vertical, 0.3462)"
+      "text": "direction_ratio(vertical, 0.4952)"
     },
     {
       "predicate": "endpoint_count",
       "args": [
-        "4"
+        "3"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "endpoint_count(4)"
+      "text": "endpoint_count(3)"
     },
     {
       "predicate": "family",
@@ -396,72 +421,29 @@
     {
       "predicate": "family",
       "args": [
-        "connected_cursive_like"
+        "complex_loop_branch_endpoint"
       ],
       "weight": 1.0,
-      "origin": "rule:combined_connected_cursive_like",
-      "text": "family(connected_cursive_like)"
+      "origin": "rule:combined_complex_loop_branch_endpoint",
+      "text": "family(complex_loop_branch_endpoint)"
     },
     {
       "predicate": "family",
       "args": [
-        "horizontal_dominant"
+        "looped"
       ],
       "weight": 1.0,
-      "origin": "rule:family_horizontal_dominant",
-      "text": "family(horizontal_dominant)"
+      "origin": "rule:family_looped",
+      "text": "family(looped)"
     },
     {
       "predicate": "family",
       "args": [
-        "left_exit"
+        "vertical_dominant"
       ],
       "weight": 1.0,
-      "origin": "rule:family_left_exit",
-      "text": "family(left_exit)"
-    },
-    {
-      "predicate": "family",
-      "args": [
-        "midline_compact"
-      ],
-      "weight": 1.0,
-      "origin": "rule:family_midline_compact",
-      "text": "family(midline_compact)"
-    },
-    {
-      "predicate": "family",
-      "args": [
-        "no_loop"
-      ],
-      "weight": 1.0,
-      "origin": "rule:family_no_loop",
-      "text": "family(no_loop)"
-    },
-    {
-      "predicate": "family",
-      "args": [
-        "right_exit"
-      ],
-      "weight": 1.0,
-      "origin": "rule:family_right_exit",
-      "text": "family(right_exit)"
-    },
-    {
-      "predicate": "family",
-      "args": [
-        "two_sided_exit"
-      ],
-      "weight": 1.0,
-      "origin": "rule:family_two_sided_exit",
-      "text": "family(two_sided_exit)"
-    },
-    {
-      "predicate": "has_left_exit",
-      "args": [],
-      "weight": 1.0,
-      "origin": "signature",
-      "text": "has_left_exit"
+      "origin": "rule:family_vertical_dominant",
+      "text": "family(vertical_dominant)"
     },
     {
       "predicate": "has_measured",
@@ -482,11 +464,13 @@
       "text": "has_measured(junction)"
     },
     {
-      "predicate": "has_right_exit",
-      "args": [],
+      "predicate": "has_measured",
+      "args": [
+        "loop"
+      ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "has_right_exit"
+      "text": "has_measured(loop)"
     },
     {
       "predicate": "has_structure",
@@ -498,40 +482,65 @@
       "text": "has_structure(junction)"
     },
     {
+      "predicate": "has_structure",
+      "args": [
+        "loop"
+      ],
+      "weight": 1.0,
+      "origin": "rule:family_looped",
+      "text": "has_structure(loop)"
+    },
+    {
       "predicate": "height",
       "args": [
-        "28.00"
+        "34.00"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "height(28.00)"
+      "text": "height(34.00)"
+    },
+    {
+      "predicate": "history",
+      "args": [
+        "reconstructed"
+      ],
+      "weight": 1.0,
+      "origin": "rule:history_reconstructed",
+      "text": "history(reconstructed)"
     },
     {
       "predicate": "ink_pixels",
       "args": [
-        "210"
+        "194"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "ink_pixels(210)"
+      "text": "ink_pixels(194)"
+    },
+    {
+      "predicate": "is_reconstructed",
+      "args": [],
+      "weight": 1.0,
+      "origin": "signature",
+      "text": "is_reconstructed"
     },
     {
       "predicate": "junction_count",
       "args": [
-        "2"
+        "3"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "junction_count(2)"
+      "text": "junction_count(3)"
     },
     {
       "predicate": "loop_count",
       "args": [
-        "0"
+        "1"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "loop_count(0)"
+      "text": "loop_count(1)"
     },
     {
       "predicate": "path_count",
@@ -545,11 +554,11 @@
     {
       "predicate": "selected_hypothesis",
       "args": [
-        "h0_original"
+        "h6_vertical_gap_closing"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "selected_hypothesis(h0_original)"
+      "text": "selected_hypothesis(h6_vertical_gap_closing)"
     },
     {
       "predicate": "source_kind",
@@ -563,32 +572,28 @@
     {
       "predicate": "unit",
       "args": [
-        "02_4_light_blur"
+        "01_42_light_cut"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "unit(02_4_light_blur)"
+      "text": "unit(01_42_light_cut)"
     },
     {
       "predicate": "width",
       "args": [
-        "23.00"
+        "30.00"
       ],
       "weight": 1.0,
       "origin": "signature",
-      "text": "width(23.00)"
+      "text": "width(30.00)"
     }
   ],
   "derived_families": [
     "branched",
     "compact",
-    "connected_cursive_like",
-    "horizontal_dominant",
-    "left_exit",
-    "midline_compact",
-    "no_loop",
-    "right_exit",
-    "two_sided_exit"
+    "complex_loop_branch_endpoint",
+    "looped",
+    "vertical_dominant"
   ],
   "warnings": [],
   "candidate_effects": [],
@@ -596,7 +601,8 @@
   "blocked_candidates": [],
   "weakened_candidates": [],
   "explanation": [
-    "Derived structural families: branched, compact, connected_cursive_like, horizontal_dominant, left_exit, midline_compact, no_loop, right_exit, two_sided_exit."
+    "Derived structural families: branched, compact, complex_loop_branch_endpoint, looped, vertical_dominant.",
+    "Reconstruction history: reconstructed."
   ],
   "status": {
     "has_warnings": false,
@@ -605,7 +611,7 @@
   },
   "engine": {
     "passes": 2,
-    "rule_fire_count": 18,
-    "fact_count": 34
+    "rule_fire_count": 12,
+    "fact_count": 32
   }
 }

@@ -93,10 +93,16 @@ class ScriLogSignatureExtractors:
 
         reconstruction = _safe_dict(root.get("reconstruction"))
         original = _safe_dict(reconstruction.get("original_hypothesis"))
+        selected_observation = _safe_dict(
+            selected.get("scrilog_observation")
+            or reconstruction.get("selected_scrilog_observation")
+            or metrics.get("scrilog_observation")
+        )
 
         return _merge_dicts(
             skeleton_graph,
             metrics,
+            selected_observation,
             _safe_dict(original.get("topology")),
             _safe_dict(root.get("topology")),
             _safe_dict(selected.get("topology")),
@@ -495,24 +501,8 @@ class ScriLogSignatureExtractors:
     # Structural inference helpers
     # --------------------------------------------------------
 
-    def _infer_bool_structure(
-        self,
-        data: Dict[str, Any],
-        endpoint_zones: Dict[str, int],
-        junction_zones: Dict[str, int],
-        loop_zones: Dict[str, int],
-    ) -> Tuple[bool, bool, bool, bool, bool, bool]:
-        """
-        Infer structural booleans from explicit flags, zones, and ML features.
-
-        Returns:
-            has_ascender
-            has_descender
-            has_left_exit
-            has_right_exit
-            has_top_contact
-            has_bottom_contact
-        """
+    def _infer_border_contacts(self, data: Dict[str, Any]) -> Tuple[bool, bool]:
+        """Read objective top/bottom border contacts without semantic guesses."""
 
         def explicit_bool(keys: List[str]) -> bool:
             for key in keys:
@@ -528,83 +518,17 @@ class ScriLogSignatureExtractors:
 
             return False
 
-        def zone_contains(*fragments: str) -> bool:
-            lowered_fragments = [fragment.lower() for fragment in fragments]
-
-            for zone_name, count in endpoint_zones.items():
-                if count <= 0:
-                    continue
-
-                zone_text = str(zone_name).lower()
-
-                for fragment in lowered_fragments:
-                    if fragment in zone_text:
-                        return True
-
-            return False
-
-        endpoint_left_ratio = _as_float(
-            data.get("endpoint_left_half_ratio"),
-            0.0,
-        )
-
-        endpoint_right_ratio = _as_float(
-            data.get("endpoint_right_half_ratio"),
-            0.0,
-        )
-
-        endpoint_top_ratio = _as_float(
-            data.get("endpoint_top_half_ratio"),
-            0.0,
-        )
-
-        endpoint_bottom_ratio = _as_float(
-            data.get("endpoint_bottom_half_ratio"),
-            0.0,
-        )
-
-        has_ascender = (
-            explicit_bool(["has_ascender", "ascender"])
-            or zone_contains("ascender", "upper")
-            or endpoint_top_ratio >= 0.75
-        )
-
-        has_descender = (
-            explicit_bool(["has_descender", "descender"])
-            or zone_contains("descender", "lower")
-            or endpoint_bottom_ratio >= 0.75
-        )
-
-        has_left_exit = (
-            explicit_bool(["has_left_exit", "left_exit"])
-            or zone_contains("left")
-            or endpoint_left_ratio >= 0.30
-        )
-
-        has_right_exit = (
-            explicit_bool(["has_right_exit", "right_exit"])
-            or zone_contains("right")
-            or endpoint_right_ratio >= 0.30
-        )
-
-        # Do not infer top/bottom contact from tight bbox edge ratios.
-        # Tight bounding boxes naturally touch their own edges.
+        border_contacts = _safe_dict(data.get("border_contacts"))
         has_top_contact = (
             explicit_bool(["has_top_contact", "top_contact"])
+            or _as_bool(border_contacts.get("top"), False)
             or numeric_positive(["border_contact_top"])
         )
 
         has_bottom_contact = (
             explicit_bool(["has_bottom_contact", "bottom_contact"])
+            or _as_bool(border_contacts.get("bottom"), False)
             or numeric_positive(["border_contact_bottom"])
         )
 
-        return (
-            has_ascender,
-            has_descender,
-            has_left_exit,
-            has_right_exit,
-            has_top_contact,
-            has_bottom_contact,
-        )
-
+        return has_top_contact, has_bottom_contact

@@ -20,8 +20,8 @@ class ScriLogClassProfile:
 
         ScriLogClassProfile(
             class_label="թ",
-            required_families=["ascender"],
-            forbidden_families=["midline_compact"],
+            required_families=["branched"],
+            forbidden_families=["multi_loop"],
             boosted_families=["vertical_dominant"],
             weakened_families=["no_loop"],
         )
@@ -67,7 +67,7 @@ class ScriLogProfileEvaluator:
     Input:
         facts:
             family(looped)
-            family(right_exit)
+            family(branched)
             family(no_loop)
             warning(...)
 

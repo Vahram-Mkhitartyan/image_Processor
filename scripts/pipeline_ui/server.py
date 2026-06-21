@@ -6,6 +6,7 @@ import json
 import mimetypes
 import os
 import random
+import re
 import signal
 import shutil
 import subprocess
@@ -112,6 +113,104 @@ NON_DOCUMENT_TEMP_FOLDERS = {
     "aristotel_ui_preview",
     "matenadata_4_0",
 }
+
+_SCRILOG_BASE_FIELD_SCHEMA = (
+    {"name": "ink_hole_count", "label": "Visual ink holes", "type": "int", "group": "Core topology", "min": 0, "max": 12},
+    {"name": "closed_loop_count", "label": "Closed skeleton loops", "type": "int", "group": "Core topology", "min": 0, "max": 12},
+    {"name": "endpoint_count", "label": "Endpoints", "type": "int", "group": "Core topology", "min": 0, "max": 32},
+    {"name": "junction_cluster_count", "label": "Junction clusters", "type": "int", "group": "Core topology", "min": 0, "max": 32},
+    {"name": "path_count", "label": "Trace paths", "type": "int", "group": "Core topology", "min": 0, "max": 64},
+    {"name": "component_count", "label": "Components", "type": "int", "group": "Core topology", "min": 0, "max": 32},
+    {"name": "isolated_point_count", "label": "Isolated points", "type": "int", "group": "Core topology", "min": 0, "max": 32},
+    {"name": "short_path_count", "label": "Short paths", "type": "int", "group": "Core topology", "min": 0, "max": 32},
+    {"name": "endpoint_top_left_count", "label": "Endpoints · top left", "type": "int", "group": "Endpoint quadrants", "min": 0, "max": 32},
+    {"name": "endpoint_top_right_count", "label": "Endpoints · top right", "type": "int", "group": "Endpoint quadrants", "min": 0, "max": 32},
+    {"name": "endpoint_bottom_left_count", "label": "Endpoints · bottom left", "type": "int", "group": "Endpoint quadrants", "min": 0, "max": 32},
+    {"name": "endpoint_bottom_right_count", "label": "Endpoints · bottom right", "type": "int", "group": "Endpoint quadrants", "min": 0, "max": 32},
+    {"name": "junction_top_left_count", "label": "Junctions · top left", "type": "int", "group": "Junction quadrants", "min": 0, "max": 32},
+    {"name": "junction_top_right_count", "label": "Junctions · top right", "type": "int", "group": "Junction quadrants", "min": 0, "max": 32},
+    {"name": "junction_bottom_left_count", "label": "Junctions · bottom left", "type": "int", "group": "Junction quadrants", "min": 0, "max": 32},
+    {"name": "junction_bottom_right_count", "label": "Junctions · bottom right", "type": "int", "group": "Junction quadrants", "min": 0, "max": 32},
+    {"name": "border_contact_left", "label": "Touches left border", "type": "bool", "group": "Objective contacts"},
+    {"name": "border_contact_right", "label": "Touches right border", "type": "bool", "group": "Objective contacts"},
+    {"name": "border_contact_top", "label": "Touches top border", "type": "bool", "group": "Objective contacts"},
+    {"name": "border_contact_bottom", "label": "Touches bottom border", "type": "bool", "group": "Objective contacts"},
+    {"name": "is_wide", "label": "Wide shape", "type": "bool", "group": "Shape family"},
+    {"name": "is_tall", "label": "Tall shape", "type": "bool", "group": "Shape family"},
+)
+
+SCRILOG_IMPORTANCE = {
+    "ink_hole_count": "high",
+    "closed_loop_count": "high",
+    "endpoint_count": "high",
+    "junction_cluster_count": "high",
+    "component_count": "high",
+    "is_wide": "high",
+    "is_tall": "high",
+    "path_count": "medium",
+    "isolated_point_count": "medium",
+    "short_path_count": "medium",
+    "border_contact_left": "medium",
+    "border_contact_right": "medium",
+    "border_contact_top": "medium",
+    "border_contact_bottom": "medium",
+}
+
+SCRILOG_IMPORTANCE_WEIGHTS = {
+    "high": 1.0,
+    "medium": 0.55,
+    "low": 0.2,
+}
+
+SCRILOG_OBSERVED_PATHS = {
+    "endpoint_top_left_count": "endpoint_quadrants.top_left",
+    "endpoint_top_right_count": "endpoint_quadrants.top_right",
+    "endpoint_bottom_left_count": "endpoint_quadrants.bottom_left",
+    "endpoint_bottom_right_count": "endpoint_quadrants.bottom_right",
+    "junction_top_left_count": "junction_quadrants.top_left",
+    "junction_top_right_count": "junction_quadrants.top_right",
+    "junction_bottom_left_count": "junction_quadrants.bottom_left",
+    "junction_bottom_right_count": "junction_quadrants.bottom_right",
+    "border_contact_left": "border_contacts.left",
+    "border_contact_right": "border_contacts.right",
+    "border_contact_top": "border_contacts.top",
+    "border_contact_bottom": "border_contacts.bottom",
+    "is_wide": "derived_families.is_wide",
+    "is_tall": "derived_families.is_tall",
+}
+
+SCRILOG_FIELD_SCHEMA = tuple(
+    {
+        **field,
+        "importance": SCRILOG_IMPORTANCE.get(field["name"], "low"),
+        "importance_weight": SCRILOG_IMPORTANCE_WEIGHTS[
+            SCRILOG_IMPORTANCE.get(field["name"], "low")
+        ],
+        "observed_path": SCRILOG_OBSERVED_PATHS.get(
+            field["name"], field["name"]
+        ),
+    }
+    for field in _SCRILOG_BASE_FIELD_SCHEMA
+)
+
+
+def _scrilog_evidence_policy() -> dict:
+    """Return the versioned bridge from expected fields to ScribeTrace output."""
+    return {
+        "version": "scrilog-evidence-policy-v1",
+        "tiers": {
+            tier: {"weight": weight}
+            for tier, weight in SCRILOG_IMPORTANCE_WEIGHTS.items()
+        },
+        "fields": {
+            field["name"]: {
+                "importance": field["importance"],
+                "weight": field["importance_weight"],
+                "observed_path": field["observed_path"],
+            }
+            for field in SCRILOG_FIELD_SCHEMA
+        },
+    }
 
 
 def _iso_timestamp(timestamp: float | None = None) -> str:
@@ -293,6 +392,11 @@ class PipelineUiApplication:
         self.models_dir = self.base_dir / "models"
         self.aristotel_input_dir = self.base_dir / "Matenadata"
         self.aristotel_preview_dir = self.temp_dir / "aristotel_ui_preview"
+        self.scrilog_annotation_path = (
+            self.base_dir / "datasets" / "scrilog" / "scrilog_annotations.json"
+        )
+        self.scrilog_preview_dir = self.temp_dir / "scrilog_ui" / "skeletons"
+        self._scrilog_sources_cache: list[dict] | None = None
         self.static_dir = Path(__file__).resolve().parent / "static"
         self.process_manager = PipelineProcessManager(
             base_dir=self.base_dir,
@@ -301,6 +405,326 @@ class PipelineUiApplication:
             # the system interpreter, otherwise subprocesses lose venv context.
             python_executable=python_executable.absolute(),
         )
+
+    @staticmethod
+    def _natural_key(value: str) -> tuple:
+        """Sort class and image names numerically where possible."""
+        return tuple(
+            int(part) if part.isdigit() else part.lower()
+            for part in re.split(r"(\d+)", value)
+        )
+
+    def _scrilog_sources(self) -> list[dict]:
+        """Return a cached deterministic catalog of Matenadata glyphs."""
+        if self._scrilog_sources_cache is not None:
+            return self._scrilog_sources_cache
+
+        records: list[dict] = []
+        if self.aristotel_input_dir.is_dir():
+            class_folders = sorted(
+                (path for path in self.aristotel_input_dir.iterdir() if path.is_dir()),
+                key=lambda path: self._natural_key(path.name),
+            )
+            for class_folder in class_folders:
+                image_paths = sorted(
+                    (
+                        path for path in class_folder.iterdir()
+                        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+                    ),
+                    key=lambda path: self._natural_key(path.name),
+                )
+                for image_path in image_paths:
+                    source_id = image_path.relative_to(
+                        self.aristotel_input_dir
+                    ).as_posix()
+                    records.append(
+                        {
+                            "source_id": source_id,
+                            "class_label": class_folder.name,
+                            "image_name": image_path.name,
+                            "path": image_path,
+                        }
+                    )
+
+        self._scrilog_sources_cache = records
+        return records
+
+    def _load_scrilog_annotations(self) -> dict:
+        """Load the single cumulative annotation document."""
+        if not self.scrilog_annotation_path.is_file():
+            return {
+                "version": "scrilog-expected-topology-v3",
+                "updated_at": None,
+                "comparison_contract": {
+                    "expected_root": "expected_signature",
+                    "observed_root": "reconstruction.selected_scrilog_observation",
+                    "evidence_policy_version": "scrilog-evidence-policy-v1",
+                },
+                "evidence_policy": _scrilog_evidence_policy(),
+                "records": {},
+            }
+        payload = json.loads(
+            self.scrilog_annotation_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("records"), dict):
+            raise ValueError("ScriLog annotation JSON has an invalid structure.")
+        allowed_fields = {field["name"] for field in SCRILOG_FIELD_SCHEMA}
+        for record in payload["records"].values():
+            if not isinstance(record, dict):
+                continue
+            old_values = record.get("expected_signature")
+            if not isinstance(old_values, dict):
+                old_values = record.get("values") or {}
+            migrated = dict(old_values)
+            legacy_aliases = {
+                "loop_count": "ink_hole_count",
+                "junction_count": "junction_cluster_count",
+                "has_top_contact": "border_contact_top",
+                "has_bottom_contact": "border_contact_bottom",
+            }
+            for old_name, new_name in legacy_aliases.items():
+                if new_name not in migrated and old_name in migrated:
+                    migrated[new_name] = migrated[old_name]
+            record["expected_signature"] = {
+                key: value for key, value in migrated.items()
+                if key in allowed_fields
+            }
+            record.pop("values", None)
+            expected = record["expected_signature"]
+            record["derived_expected"] = {
+                "is_looped": bool(
+                    int(expected.get("ink_hole_count", 0)) > 0
+                    or int(expected.get("closed_loop_count", 0)) > 0
+                ),
+                "is_branched": int(expected.get("junction_cluster_count", 0)) > 0,
+                "is_wide": bool(expected.get("is_wide", False)),
+                "is_tall": bool(expected.get("is_tall", False)),
+            }
+            spatial_fields = {
+                "endpoint_top_left_count",
+                "endpoint_top_right_count",
+                "endpoint_bottom_left_count",
+                "endpoint_bottom_right_count",
+                "junction_top_left_count",
+                "junction_top_right_count",
+                "junction_bottom_left_count",
+                "junction_bottom_right_count",
+            }
+            record["contract_status"] = (
+                "complete"
+                if spatial_fields.issubset(expected)
+                else "needs_spatial_review"
+            )
+            record["evidence_policy_version"] = "scrilog-evidence-policy-v1"
+        payload["version"] = "scrilog-expected-topology-v3"
+        payload["comparison_contract"] = {
+            "expected_root": "expected_signature",
+            "observed_root": "reconstruction.selected_scrilog_observation",
+            "evidence_policy_version": "scrilog-evidence-policy-v1",
+        }
+        payload["evidence_policy"] = _scrilog_evidence_policy()
+        return payload
+
+    def _scrilog_skeleton_preview(self, sample: dict) -> Path:
+        """Create or reuse a ScribeTrace-compatible skeleton preview."""
+        source_path = sample["path"]
+        relative_source = Path(sample["source_id"])
+        preview_path = (
+            self.scrilog_preview_dir
+            / relative_source.parent
+            / f"{relative_source.stem}_topology_otsu_quadrants.png"
+        )
+        if (
+            preview_path.is_file()
+            and preview_path.stat().st_mtime >= source_path.stat().st_mtime
+        ):
+            return preview_path
+
+        scripts_dir = str(self.scripts_dir)
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import cv2
+        from N05handwritten_ocr.scribetrace.trace_masks import TraceMaskAdapter
+        from N05handwritten_ocr.scribetrace.trace_skeleton import (
+            SkeletonGraph,
+            SkeletonPointExtractor,
+            TraceSkeletonizer,
+        )
+
+        binary_mask = TraceMaskAdapter(
+            {"ink_threshold_mode": "otsu", "fixed_threshold_value": 128}
+        ).load_trace_mask(str(source_path))
+        skeleton = TraceSkeletonizer().skeletonize(binary_mask)
+        graph = SkeletonGraph(SkeletonPointExtractor().extract_points(skeleton))
+        topology_preview = cv2.cvtColor(skeleton, cv2.COLOR_GRAY2BGR)
+        if graph.points:
+            min_x = min(point.x for point in graph.points)
+            max_x = max(point.x for point in graph.points)
+            min_y = min(point.y for point in graph.points)
+            max_y = max(point.y for point in graph.points)
+            center_x = round((min_x + max_x) / 2)
+            center_y = round((min_y + max_y) / 2)
+            cv2.line(
+                topology_preview,
+                (center_x, min_y),
+                (center_x, max_y),
+                (72, 63, 50),
+                1,
+            )
+            cv2.line(
+                topology_preview,
+                (min_x, center_y),
+                (max_x, center_y),
+                (72, 63, 50),
+                1,
+            )
+        for point in graph.endpoints():
+            cv2.circle(topology_preview, (point.x, point.y), 1, (90, 235, 120), -1)
+        for point in graph.junction_cluster_centers():
+            cv2.circle(topology_preview, (point.x, point.y), 1, (35, 145, 245), -1)
+        for point in graph.isolated_points():
+            cv2.circle(topology_preview, (point.x, point.y), 1, (245, 130, 65), -1)
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(preview_path), topology_preview):
+            raise ValueError(f"Failed to save ScriLog skeleton: {preview_path}")
+        return preview_path
+
+    def scrilog_workspace(self, index: int = 0, class_label: str = "") -> dict:
+        """Return one sequential glyph, field schema, and saved values."""
+        all_sources = self._scrilog_sources()
+        class_labels = sorted(
+            {record["class_label"] for record in all_sources},
+            key=self._natural_key,
+        )
+        visible = (
+            [record for record in all_sources if record["class_label"] == class_label]
+            if class_label else all_sources
+        )
+        annotations = self._load_scrilog_annotations()
+        records = annotations["records"]
+        if not visible:
+            return {
+                "status": "empty",
+                "schema": list(SCRILOG_FIELD_SCHEMA),
+                "class_labels": class_labels,
+                "annotation_count": len(records),
+                "output_path": str(self.scrilog_annotation_path.relative_to(self.base_dir)),
+            }
+
+        safe_index = max(0, min(int(index), len(visible) - 1))
+        sample = visible[safe_index]
+        skeleton_path = self._scrilog_skeleton_preview(sample)
+        return {
+            "status": "completed",
+            "index": safe_index,
+            "total": len(visible),
+            "global_total": len(all_sources),
+            "class_filter": class_label,
+            "class_labels": class_labels,
+            "schema": list(SCRILOG_FIELD_SCHEMA),
+            "annotation_count": len(records),
+            "output_path": str(self.scrilog_annotation_path.relative_to(self.base_dir)),
+            "sample": {
+                "source_id": sample["source_id"],
+                "class_label": sample["class_label"],
+                "image_name": sample["image_name"],
+                "url": self._artifact_url_for_path(skeleton_path),
+                "source_url": self._artifact_url_for_path(sample["path"]),
+                "display_kind": "scrilog_topology_map_otsu_quadrants",
+                "annotation": records.get(sample["source_id"]),
+            },
+        }
+
+    def save_scrilog_annotation(self, payload: dict) -> dict:
+        """Validate and atomically upsert one glyph into the JSON export."""
+        source_id = str(payload.get("source_id", "")).strip()
+        source_lookup = {
+            record["source_id"]: record for record in self._scrilog_sources()
+        }
+        if source_id not in source_lookup:
+            raise ValueError("Unknown Matenadata source_id.")
+
+        incoming_values = payload.get("values")
+        if not isinstance(incoming_values, dict):
+            raise ValueError("ScriLog values must be a JSON object.")
+
+        clean_values = {}
+        for field_spec in SCRILOG_FIELD_SCHEMA:
+            name = field_spec["name"]
+            value = incoming_values.get(name, False if field_spec["type"] == "bool" else 0)
+            if field_spec["type"] == "bool":
+                clean_values[name] = bool(value)
+                continue
+            try:
+                number = int(value)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"{name} must be an integer.") from error
+            clean_values[name] = max(
+                int(field_spec.get("min", number)),
+                min(number, int(field_spec.get("max", number))),
+            )
+
+        endpoint_quadrant_total = sum(
+            clean_values[name]
+            for name in (
+                "endpoint_top_left_count",
+                "endpoint_top_right_count",
+                "endpoint_bottom_left_count",
+                "endpoint_bottom_right_count",
+            )
+        )
+        if endpoint_quadrant_total != clean_values["endpoint_count"]:
+            raise ValueError(
+                "Endpoint quadrant counts must add up to endpoint_count."
+            )
+        junction_quadrant_total = sum(
+            clean_values[name]
+            for name in (
+                "junction_top_left_count",
+                "junction_top_right_count",
+                "junction_bottom_left_count",
+                "junction_bottom_right_count",
+            )
+        )
+        if junction_quadrant_total != clean_values["junction_cluster_count"]:
+            raise ValueError(
+                "Junction quadrant counts must add up to junction_cluster_count."
+            )
+        sample = source_lookup[source_id]
+        document = self._load_scrilog_annotations()
+        document["updated_at"] = _iso_timestamp()
+        document["records"][source_id] = {
+            "source_id": source_id,
+            "class_label": sample["class_label"],
+            "image_name": sample["image_name"],
+            "expected_signature": clean_values,
+            "derived_expected": {
+                "is_looped": bool(
+                    clean_values["ink_hole_count"] > 0
+                    or clean_values["closed_loop_count"] > 0
+                ),
+                "is_branched": clean_values["junction_cluster_count"] > 0,
+                "is_wide": clean_values["is_wide"],
+                "is_tall": clean_values["is_tall"],
+            },
+            "contract_status": "complete",
+            "evidence_policy_version": "scrilog-evidence-policy-v1",
+            "notes": str(payload.get("notes", "")).strip()[:2000],
+            "updated_at": document["updated_at"],
+        }
+        self.scrilog_annotation_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = self.scrilog_annotation_path.with_suffix(".json.tmp")
+        temporary_path.write_text(
+            json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary_path.replace(self.scrilog_annotation_path)
+        return {
+            "status": "saved",
+            "source_id": source_id,
+            "annotation_count": len(document["records"]),
+            "output_path": str(self.scrilog_annotation_path.relative_to(self.base_dir)),
+        }
 
     def _document_sources(self) -> dict[str, Path]:
         """Return supported input documents keyed by filename stem."""
@@ -1627,6 +2051,15 @@ def _handler_factory(application: PipelineUiApplication):
                     )
                 elif parsed.path == "/api/training-overview":
                     self._send_json(application.training_overview())
+                elif parsed.path == "/api/scrilog-workspace":
+                    self._send_json(
+                        application.scrilog_workspace(
+                            index=int(query.get("index", ["0"])[0]),
+                            class_label=query.get("class", [""])[0],
+                        )
+                    )
+                elif parsed.path == "/api/scrilog-export":
+                    self._send_json(application._load_scrilog_annotations())
                 elif parsed.path == "/artifact":
                     artifact = application.resolve_artifact(
                         query.get("path", [""])[0]
@@ -1664,6 +2097,8 @@ def _handler_factory(application: PipelineUiApplication):
                 elif parsed.path == "/api/stop":
                     state = application.process_manager.stop()
                     self._send_json({"process": state})
+                elif parsed.path == "/api/scrilog-annotation":
+                    self._send_json(application.save_scrilog_annotation(payload))
                 else:
                     self._send_error_json(
                         "Route not found.",

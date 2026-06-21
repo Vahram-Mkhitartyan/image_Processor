@@ -2585,3 +2585,386 @@ h2 {
     grid-template-columns: 1fr;
   }
 }
+
+/* ScriLog symbolic annotation foundry */
+.scrilog-panel {
+  padding: 22px;
+  border: 1px solid rgba(71, 181, 139, 0.22);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 82% 4%, rgba(71, 181, 139, 0.12), transparent 31%),
+    linear-gradient(145deg, rgba(12, 23, 39, 0.97), rgba(7, 14, 24, 0.96));
+  box-shadow: var(--shadow);
+}
+
+.scrilog-header,
+.scrilog-toolbar,
+.scrilog-glyph-meta,
+.scrilog-image-footer,
+.scrilog-editor-heading,
+.scrilog-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.scrilog-header small,
+.scrilog-status,
+.scrilog-editor-footer span {
+  color: var(--ink-soft);
+  font: 10px/1.55 var(--mono);
+}
+
+.scrilog-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.scrilog-button,
+.scrilog-nav-button,
+.scrilog-reset-button {
+  border: 1px solid rgba(71, 181, 139, 0.46);
+  border-radius: 9px;
+  color: #dffcf1;
+  background: linear-gradient(145deg, rgba(71, 181, 139, 0.28), rgba(19, 69, 57, 0.34));
+  cursor: pointer;
+  font: 700 10px/1 var(--mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  transition: 150ms ease;
+}
+
+.scrilog-button { padding: 11px 15px; }
+.scrilog-button.secondary,
+.scrilog-reset-button {
+  color: var(--ink-soft);
+  border-color: var(--line-strong);
+  background: rgba(9, 18, 30, 0.72);
+}
+
+.scrilog-button:hover,
+.scrilog-nav-button:hover,
+.scrilog-reset-button:hover {
+  border-color: var(--green);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(24, 110, 84, 0.18);
+}
+
+.scrilog-toolbar {
+  margin-top: 19px;
+  padding: 10px;
+  justify-content: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(5, 12, 21, 0.64);
+}
+
+.scrilog-nav-button {
+  width: 42px;
+  height: 42px;
+  font-size: 17px;
+}
+
+.scrilog-nav-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.scrilog-position-field,
+.scrilog-class-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-soft);
+  font: 700 9px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.scrilog-position-field input,
+.scrilog-class-field select {
+  height: 38px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--ink);
+  background: #091321;
+  font: 700 12px/1 var(--mono);
+}
+
+.scrilog-position-field input {
+  width: 90px;
+  padding: 0 10px;
+}
+
+.scrilog-class-field select {
+  min-width: 145px;
+  padding: 0 28px 0 10px;
+}
+
+.scrilog-position-field strong {
+  min-width: 75px;
+  color: var(--green);
+}
+
+.scrilog-status {
+  min-height: 31px;
+  padding: 10px 3px 4px;
+}
+
+.scrilog-workbench {
+  display: grid;
+  grid-template-columns: minmax(330px, 0.82fr) minmax(540px, 1.45fr);
+  gap: 16px;
+}
+
+.scrilog-glyph-card,
+.scrilog-editor {
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 13px;
+  background: rgba(10, 20, 34, 0.82);
+  overflow: hidden;
+}
+
+.scrilog-glyph-meta,
+.scrilog-image-footer {
+  min-height: 48px;
+  padding: 10px 13px;
+  font: 10px/1.3 var(--mono);
+}
+
+.scrilog-glyph-meta span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #07130e;
+  background: var(--green);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.scrilog-glyph-meta strong {
+  overflow: hidden;
+  color: var(--ink-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scrilog-image-stage {
+  min-height: 465px;
+  display: grid;
+  place-items: center;
+  padding: 25px;
+  border-block: 1px solid var(--line);
+  background:
+    linear-gradient(45deg, rgba(255,255,255,0.025) 25%, transparent 25%) 0 0 / 18px 18px,
+    #050b13;
+}
+
+.scrilog-image-stage img {
+  width: min(100%, 410px);
+  height: 410px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 16px 28px rgba(0, 0, 0, 0.42));
+}
+
+.scrilog-image-footer {
+  color: var(--ink-soft);
+}
+
+#scrilog-save-state {
+  color: var(--green);
+  font-weight: 800;
+}
+
+#scrilog-save-state.dirty { color: var(--orange-dark); }
+
+.scrilog-editor {
+  padding: 17px;
+}
+
+.scrilog-editor-heading h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.scrilog-reset-button { padding: 8px 10px; }
+
+.scrilog-fields {
+  margin-top: 15px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(112px, 1fr));
+  gap: 8px;
+}
+
+.scrilog-field { min-width: 0; }
+
+.scrilog-field-int label {
+  min-height: 69px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(7, 15, 26, 0.72);
+}
+
+.scrilog-field-int span,
+.scrilog-notes-field span {
+  color: var(--ink-soft);
+  font: 700 9px/1.2 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.scrilog-field-int input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid rgba(71, 181, 139, 0.35);
+  color: #effff8;
+  background: transparent;
+  outline: none;
+  font: 800 18px/1 var(--mono);
+}
+
+.scrilog-toggle {
+  width: 100%;
+  min-height: 69px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink-soft);
+  background: rgba(7, 15, 26, 0.72);
+  cursor: pointer;
+  text-align: left;
+  font: 700 9px/1.2 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.scrilog-toggle strong {
+  color: #607188;
+  font-size: 14px;
+}
+
+.scrilog-toggle.active {
+  border-color: rgba(71, 181, 139, 0.64);
+  color: #dffcf1;
+  background: linear-gradient(145deg, rgba(32, 111, 87, 0.38), rgba(11, 35, 32, 0.5));
+  box-shadow: inset 3px 0 0 var(--green);
+}
+
+.scrilog-toggle.active strong { color: var(--green); }
+
+.scrilog-notes-field {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.scrilog-notes-field textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 10px;
+  color: var(--ink);
+  background: rgba(5, 12, 21, 0.76);
+  outline: none;
+  font: 11px/1.5 var(--mono);
+}
+
+.scrilog-editor-footer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 1300px) {
+  .scrilog-workbench { grid-template-columns: 330px minmax(500px, 1fr); }
+  .scrilog-fields { grid-template-columns: repeat(3, minmax(105px, 1fr)); }
+}
+
+.scrilog-render-kind {
+  color: #8bc9ff;
+  font: 800 8px/1 var(--mono);
+  letter-spacing: 0.1em;
+}
+
+.scrilog-field-group {
+  grid-column: 1 / -1;
+  margin-top: 7px;
+  padding: 8px 2px 5px;
+  border-bottom: 1px solid var(--line);
+  color: #8bc9ff;
+  font: 800 9px/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.scrilog-topology-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 13px;
+  padding: 0 13px 12px;
+  color: var(--ink-soft);
+  font: 700 8px/1 var(--mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.scrilog-topology-legend span::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  display: inline-block;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.scrilog-topology-legend .endpoint::before { background: #78eb5a; }
+.scrilog-topology-legend .junction::before { background: #f59123; }
+.scrilog-topology-legend .isolated::before { background: #4182f5; }
+
+.scrilog-topology-legend .quadrant::before {
+  border-radius: 1px;
+  background: #483f32;
+}
+
+.scrilog-field em {
+  float: right;
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: 800 7px/1 var(--mono);
+  font-style: normal;
+  letter-spacing: 0.08em;
+}
+
+.scrilog-field .importance-high {
+  color: #ffbf72;
+  border-color: rgba(228, 119, 37, 0.5);
+  background: rgba(228, 119, 37, 0.1);
+}
+
+.scrilog-field .importance-medium {
+  color: #78d7b4;
+  border-color: rgba(71, 181, 139, 0.42);
+  background: rgba(71, 181, 139, 0.08);
+}
+
+.scrilog-field .importance-low {
+  color: #8fa2ba;
+  border-color: rgba(143, 162, 186, 0.3);
+  background: rgba(143, 162, 186, 0.06);
+}

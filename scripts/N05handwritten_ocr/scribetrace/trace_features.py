@@ -5,6 +5,94 @@ import math
 from .trace_models import BoundingBox, TraceFeatureVector
 from .trace_settings import normalize_trace_settings
 
+
+def build_scrilog_observation(
+    components,
+    skeleton_graph,
+    trace_paths,
+    ink_holes,
+    mask_shape,
+):
+    """Build human-comparable topology metadata outside the RF vector."""
+    graph_points = list(getattr(skeleton_graph, "points", []) or [])
+    if graph_points:
+        min_x = min(point.x for point in graph_points)
+        max_x = max(point.x for point in graph_points)
+        min_y = min(point.y for point in graph_points)
+        max_y = max(point.y for point in graph_points)
+        center_x = (min_x + max_x) / 2.0
+        center_y = (min_y + max_y) / 2.0
+    else:
+        min_x = max_x = min_y = max_y = 0
+        center_x = center_y = 0.0
+
+    def quadrant_counts(points):
+        counts = {
+            "top_left": 0,
+            "top_right": 0,
+            "bottom_left": 0,
+            "bottom_right": 0,
+        }
+        for point in points:
+            vertical = "top" if point.y <= center_y else "bottom"
+            horizontal = "left" if point.x <= center_x else "right"
+            counts[f"{vertical}_{horizontal}"] += 1
+        return counts
+
+    endpoints = list(skeleton_graph.endpoints()) if skeleton_graph else []
+    junction_centers = (
+        list(skeleton_graph.junction_cluster_centers())
+        if skeleton_graph else []
+    )
+    isolated_points = (
+        list(skeleton_graph.isolated_points()) if skeleton_graph else []
+    )
+    all_ink_points = [
+        point
+        for component in (components or [])
+        for point in component.points
+    ]
+    height, width = tuple(mask_shape[:2]) if mask_shape is not None else (0, 0)
+    border_contacts = {
+        "left": any(point.x <= 0 for point in all_ink_points),
+        "right": any(point.x >= width - 1 for point in all_ink_points) if width else False,
+        "top": any(point.y <= 0 for point in all_ink_points),
+        "bottom": any(point.y >= height - 1 for point in all_ink_points) if height else False,
+    }
+    bbox_width = max_x - min_x + 1 if graph_points else 0
+    bbox_height = max_y - min_y + 1 if graph_points else 0
+    aspect_ratio = bbox_width / bbox_height if bbox_height else 0.0
+
+    return {
+        "contract_version": "scrilog-topology-v2",
+        "ink_hole_count": int(len(ink_holes or [])),
+        "closed_loop_count": int(sum(path.is_closed for path in trace_paths or [])),
+        "endpoint_count": int(len(endpoints)),
+        "junction_cluster_count": int(len(junction_centers)),
+        "path_count": int(len(trace_paths or [])),
+        "component_count": int(len(components or [])),
+        "isolated_point_count": int(len(isolated_points)),
+        "short_path_count": int(sum(path.is_short for path in trace_paths or [])),
+        "endpoint_quadrants": quadrant_counts(endpoints),
+        "junction_quadrants": quadrant_counts(junction_centers),
+        "border_contacts": border_contacts,
+        "ink_bbox": {
+            "x1": int(min_x),
+            "y1": int(min_y),
+            "x2": int(max_x + 1) if graph_points else 0,
+            "y2": int(max_y + 1) if graph_points else 0,
+            "width": int(bbox_width),
+            "height": int(bbox_height),
+            "aspect_ratio": float(aspect_ratio),
+        },
+        "derived_families": {
+            "is_looped": bool(ink_holes or any(path.is_closed for path in trace_paths or [])),
+            "is_branched": bool(junction_centers),
+            "is_wide": bool(aspect_ratio >= 1.35),
+            "is_tall": bool(0.0 < aspect_ratio <= 0.75),
+        },
+    }
+
 class TraceFeatureEncoder:
     """
     Convert ScribeTrace geometric evidence into ML-ready features.
@@ -750,5 +838,4 @@ class TraceFeatureEncoder:
             sequence=sequence,
             sequence_string=sequence_string,
         )
-
 

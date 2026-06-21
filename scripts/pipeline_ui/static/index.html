@@ -87,6 +87,32 @@
         </section>
       </div>
 
+      <div class="sidebar-view" data-sidebar-panel="scrilog-lab">
+        <section class="rail-section">
+          <div class="section-heading">
+            <span>ScriLog Lab</span>
+            <span id="scrilog-saved-count" class="count-pill">0</span>
+          </div>
+          <p class="rail-note">
+            Walk Matenadata in stable order and author symbolic facts without
+            touching the source glyphs.
+          </p>
+          <div class="utility-grid single-column">
+            <button id="scrilog-sidebar-save" class="utility-button">Save current glyph</button>
+            <button id="scrilog-sidebar-export" class="utility-button">Export one JSON</button>
+            <button class="utility-button" data-command="lines">Sacred lines</button>
+          </div>
+        </section>
+        <section class="rail-section">
+          <div class="section-heading"><span>Output Contract</span></div>
+          <div class="rail-chip-list">
+            <span>deterministic sequence</span>
+            <span>typed facts</span>
+            <span>single JSON</span>
+          </div>
+        </section>
+      </div>
+
       <div class="sidebar-view" data-sidebar-panel="training-lab">
         <section class="rail-section">
           <div class="section-heading">
@@ -132,6 +158,9 @@
       <nav class="workspace-tabs" aria-label="Control room pages">
         <button class="workspace-tab active" data-view="artifact-trace">
           Artifact Trace
+        </button>
+        <button class="workspace-tab" data-view="scrilog-lab">
+          ScriLog Lab
         </button>
         <button class="workspace-tab" data-view="aristotel-lab">
           Aristotel Lab
@@ -267,6 +296,79 @@
               </div>
               <div id="contact-sheet" class="contact-sheet"></div>
             </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="workspace-view" data-view-panel="scrilog-lab">
+        <section class="scrilog-panel">
+          <div class="scrilog-header">
+            <div>
+              <p class="eyebrow">SCRILOG SYMBOLIC FOUNDRY</p>
+              <h2>Teach structure, one glyph at a time</h2>
+              <small id="scrilog-output-path">Preparing Matenadata sequence...</small>
+            </div>
+            <div class="scrilog-header-actions">
+              <button id="scrilog-export" class="scrilog-button secondary">Export JSON</button>
+              <button id="scrilog-save-next" class="scrilog-button">Save + next class</button>
+            </div>
+          </div>
+
+          <div class="scrilog-toolbar">
+            <button id="scrilog-previous" class="scrilog-nav-button" aria-label="Previous glyph">←</button>
+            <label class="scrilog-position-field">
+              <span>Sequence</span>
+              <input id="scrilog-index" type="number" min="1" value="1">
+              <strong id="scrilog-total">/ 0</strong>
+            </label>
+            <label class="scrilog-class-field">
+              <span>Class</span>
+              <select id="scrilog-class-filter"><option value="">All classes</option></select>
+            </label>
+            <button id="scrilog-next" class="scrilog-nav-button" aria-label="Next glyph">→</button>
+          </div>
+
+          <div id="scrilog-status" class="scrilog-status">Loading ScriLog workspace...</div>
+          <div class="scrilog-workbench">
+            <article class="scrilog-glyph-card">
+              <div class="scrilog-glyph-meta">
+                <span id="scrilog-class-badge">CLASS —</span>
+                <strong id="scrilog-source-id">No sample selected</strong>
+              </div>
+              <div class="scrilog-image-stage">
+                <img id="scrilog-image" alt="Matenadata glyph for ScriLog annotation">
+              </div>
+              <div class="scrilog-image-footer">
+                <span id="scrilog-image-name">—</span>
+                <span class="scrilog-render-kind">TOPOLOGY MAP</span>
+                <span id="scrilog-save-state">UNSAVED</span>
+              </div>
+              <div class="scrilog-topology-legend">
+                <span class="endpoint">endpoint</span>
+                <span class="junction">junction cluster</span>
+                <span class="isolated">isolated point</span>
+                <span class="quadrant">quadrant boundary</span>
+              </div>
+            </article>
+
+            <section class="scrilog-editor">
+              <div class="scrilog-editor-heading">
+                <div>
+                  <p class="eyebrow">STRUCTURAL FACTS</p>
+                  <h3>Observed geometry</h3>
+                </div>
+                <button id="scrilog-reset" class="scrilog-reset-button">Reset fields</button>
+              </div>
+              <div id="scrilog-fields" class="scrilog-fields"></div>
+              <label class="scrilog-notes-field">
+                <span>Observation notes</span>
+                <textarea id="scrilog-notes" rows="3" placeholder="Optional ambiguity, writer style, damaged stroke..."></textarea>
+              </label>
+              <div class="scrilog-editor-footer">
+                <span>Booleans are explicit ON/OFF evidence. Counts accept integers only.</span>
+                <button id="scrilog-save" class="scrilog-button">Save annotation</button>
+              </div>
+            </section>
           </div>
         </section>
       </section>

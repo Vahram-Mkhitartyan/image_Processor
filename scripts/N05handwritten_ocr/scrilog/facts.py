@@ -192,10 +192,10 @@ class ScriLogFactBase:
         Example:
             facts:
                 family(looped)
-                family(descender)
+                family(branched)
 
             find_arg0("family")
-            -> ["looped", "descender"]
+            -> ["looped", "branched"]
         """
 
         values: List[str] = []

@@ -32,7 +32,7 @@ from .trace_defense_registry import (
 )
 from .trace_defenses import DefenseHypothesis, generate_defense_hypotheses
 from .trace_debug import TraceDebugWriter
-from .trace_features import TraceFeatureEncoder
+from .trace_features import TraceFeatureEncoder, build_scrilog_observation
 from .trace_inference import predict_rf_candidates
 from .trace_masks import InkComponentExtractor, InkHoleDetector
 from .trace_models import TraceResult
@@ -283,6 +283,13 @@ def _trace_mask(mask, settings):
             "ink_hole_count": len(ink_holes),
             "landmark_count": len(landmarks),
         }
+    )
+    metrics["scrilog_observation"] = build_scrilog_observation(
+        components=components,
+        skeleton_graph=graph,
+        trace_paths=paths,
+        ink_holes=ink_holes,
+        mask_shape=cleaned_mask.shape,
     )
 
     feature_vector = TraceFeatureEncoder(settings).encode(
@@ -552,6 +559,9 @@ class TheoreticalReconstructor:
                 "accepted": True,
                 "selected": True,
                 "topology": original_topology,
+                "scrilog_observation": original_result.metrics.get(
+                    "scrilog_observation"
+                ),
                 "mask_path": debug_paths.get("h0_mask_path"),
                 "visual_path": debug_paths.get("h0_visual_path"),
                 "overlay_path": debug_paths.get("h0_overlay_path"),
@@ -567,6 +577,9 @@ class TheoreticalReconstructor:
                 original_result.feature_vector.to_dict()
                 if original_result.feature_vector is not None
                 else None
+            ),
+            "selected_scrilog_observation": original_result.metrics.get(
+                "scrilog_observation"
             ),
             "selected_mask_path": debug_paths.get("h0_mask_path"),
             "selected_visual_path": debug_paths.get("h0_visual_path"),
@@ -759,6 +772,9 @@ class TheoreticalReconstructor:
                 "accepted": True,
                 "selected": selected is None,
                 "topology": original_topology,
+                "scrilog_observation": original_result.metrics.get(
+                    "scrilog_observation"
+                ),
                 "recognition": original_recognition,
                 "mask_path": debug_paths.get("h0_mask_path"),
                 "visual_path": debug_paths.get("h0_visual_path"),
@@ -786,6 +802,11 @@ class TheoreticalReconstructor:
                     if original_result.feature_vector is not None
                     else None
                 )
+            ),
+            "selected_scrilog_observation": (
+                selected.get("scrilog_observation")
+                if selected
+                else original_result.metrics.get("scrilog_observation")
             ),
             "selected_mask_path": (
                 selected["candidate_mask_path"]
@@ -1855,6 +1876,9 @@ class TheoreticalReconstructor:
                 candidate_result.feature_vector.to_dict()
                 if candidate_result.feature_vector is not None
                 else None
+            ),
+            "scrilog_observation": candidate_result.metrics.get(
+                "scrilog_observation"
             ),
             "metadata": safe_metadata,
         }

@@ -82,6 +82,8 @@ MAIN_COMMANDS = (
     "counts",
     "lines",
     "doctor",
+    "compare",
+    "benchmark",
     "train",
     "batch",
     "pipeline",
@@ -1618,6 +1620,40 @@ def show_shell_completion(words_only=False):
     print("  .venv/bin/python scripts/main.py <Tab>")
 
 
+def run_comparison_tool(targets, output_path=None):
+    """Compare two pipeline artifacts and save a structured difference report.
+
+    Args:
+        targets: Two file or directory paths to compare.
+        output_path: Optional destination for the JSON report.
+
+    Returns:
+        The generated comparison report.
+    """
+    from project_tools.compare import compare_paths
+
+    return compare_paths(
+        targets[0],
+        targets[1],
+        base_dir=BASE_DIR,
+        output_path=output_path,
+    )
+
+
+def run_benchmark_tool(update=False):
+    """Create or verify the deterministic ScribeTrace geometry baseline.
+
+    Args:
+        update: Replace the committed baseline when true.
+
+    Returns:
+        True when baseline creation or verification succeeds.
+    """
+    from project_tools.benchmark import run_scribetrace_benchmark
+
+    return run_scribetrace_benchmark(BASE_DIR, update=update)
+
+
 def main():
     """Parse the CLI command and run the requested action.
     
@@ -1635,6 +1671,20 @@ def main():
         "command",
         choices=MAIN_COMMANDS,
         help="Command to run."
+    )
+    parser.add_argument(
+        "targets",
+        nargs="*",
+        help="Paths consumed by commands such as compare.",
+    )
+    parser.add_argument(
+        "--output",
+        help="Optional JSON report path for the compare command.",
+    )
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="Intentionally replace the benchmark baseline.",
     )
     parser.add_argument(
         "--words",
@@ -1658,6 +1708,21 @@ def main():
 
     elif args.command == "doctor":
         if not run_project_doctor():
+            raise SystemExit(1)
+
+    elif args.command == "compare":
+        if len(args.targets) != 2:
+            parser.error("compare requires exactly two file or directory paths")
+        if args.update:
+            parser.error("--update is only valid with benchmark")
+        run_comparison_tool(args.targets, output_path=args.output)
+
+    elif args.command == "benchmark":
+        if args.targets:
+            parser.error("benchmark does not accept positional paths")
+        if args.output:
+            parser.error("--output is only valid with compare")
+        if not run_benchmark_tool(update=args.update):
             raise SystemExit(1)
 
     elif args.command == "train":

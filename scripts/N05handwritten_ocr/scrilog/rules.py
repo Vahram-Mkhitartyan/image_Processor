@@ -37,8 +37,7 @@ class ScriLogRuleFactory:
         ScriLogRuleFactory._add_loop_rules(rules)
         ScriLogRuleFactory._add_endpoint_rules(rules)
         ScriLogRuleFactory._add_junction_rules(rules)
-        ScriLogRuleFactory._add_extension_rules(rules)
-        ScriLogRuleFactory._add_exit_rules(rules)
+        ScriLogRuleFactory._add_contact_rules(rules)
         ScriLogRuleFactory._add_shape_ratio_rules(rules)
         ScriLogRuleFactory._add_direction_rules(rules)
         ScriLogRuleFactory._add_reconstruction_rules(rules)
@@ -182,91 +181,11 @@ class ScriLogRuleFactory:
         )
 
     # --------------------------------------------------------
-    # Ascender / descender rules
+    # Objective border-contact rules
     # --------------------------------------------------------
 
     @staticmethod
-    def _add_extension_rules(rules: List[ScriLogRule]) -> None:
-        rules.append(
-            ScriLogRule(
-                name="family_ascender",
-                description="Glyph has upper extension.",
-                condition=lambda facts, signature: signature.has_ascender,
-                action=lambda facts, signature: [
-                    _fact("family", "ascender"),
-                    _fact("has_structure", "upper_extension"),
-                ],
-            )
-        )
-
-        rules.append(
-            ScriLogRule(
-                name="family_descender",
-                description="Glyph has lower extension.",
-                condition=lambda facts, signature: signature.has_descender,
-                action=lambda facts, signature: [
-                    _fact("family", "descender"),
-                    _fact("has_structure", "lower_extension"),
-                ],
-            )
-        )
-
-        rules.append(
-            ScriLogRule(
-                name="family_midline_compact",
-                description="Glyph has no detected upper/lower extension.",
-                condition=lambda facts, signature: (
-                    not signature.has_ascender
-                    and not signature.has_descender
-                ),
-                action=lambda facts, signature: [
-                    _fact("family", "midline_compact"),
-                ],
-            )
-        )
-
-    # --------------------------------------------------------
-    # Exit/contact rules
-    # --------------------------------------------------------
-
-    @staticmethod
-    def _add_exit_rules(rules: List[ScriLogRule]) -> None:
-        rules.append(
-            ScriLogRule(
-                name="family_left_exit",
-                description="Glyph has a left-side endpoint/contact.",
-                condition=lambda facts, signature: signature.has_left_exit,
-                action=lambda facts, signature: [
-                    _fact("family", "left_exit"),
-                ],
-            )
-        )
-
-        rules.append(
-            ScriLogRule(
-                name="family_right_exit",
-                description="Glyph has a right-side endpoint/contact.",
-                condition=lambda facts, signature: signature.has_right_exit,
-                action=lambda facts, signature: [
-                    _fact("family", "right_exit"),
-                ],
-            )
-        )
-
-        rules.append(
-            ScriLogRule(
-                name="family_two_sided_exit",
-                description="Glyph has both left and right exits.",
-                condition=lambda facts, signature: (
-                    signature.has_left_exit
-                    and signature.has_right_exit
-                ),
-                action=lambda facts, signature: [
-                    _fact("family", "two_sided_exit"),
-                ],
-            )
-        )
-
+    def _add_contact_rules(rules: List[ScriLogRule]) -> None:
         rules.append(
             ScriLogRule(
                 name="family_top_contact",
@@ -451,49 +370,6 @@ class ScriLogRuleFactory:
     def _add_combined_family_rules(rules: List[ScriLogRule]) -> None:
         rules.append(
             ScriLogRule(
-                name="combined_looped_right_exit",
-                description="Looped glyph with right exit.",
-                condition=lambda facts, signature: (
-                    facts.has("family", "looped")
-                    and facts.has("family", "right_exit")
-                ),
-                action=lambda facts, signature: [
-                    _fact("family", "looped_right_exit"),
-                ],
-            )
-        )
-
-        rules.append(
-            ScriLogRule(
-                name="combined_looped_descender",
-                description="Looped glyph with descender.",
-                condition=lambda facts, signature: (
-                    facts.has("family", "looped")
-                    and facts.has("family", "descender")
-                ),
-                action=lambda facts, signature: [
-                    _fact("family", "looped_descender"),
-                ],
-            )
-        )
-
-        rules.append(
-            ScriLogRule(
-                name="combined_simple_midline_two_endpoint",
-                description="Compact midline glyph with two endpoints and no branches.",
-                condition=lambda facts, signature: (
-                    facts.has("family", "midline_compact")
-                    and facts.has("family", "two_endpoint")
-                    and facts.has("family", "unbranched")
-                ),
-                action=lambda facts, signature: [
-                    _fact("family", "simple_midline_two_endpoint"),
-                ],
-            )
-        )
-
-        rules.append(
-            ScriLogRule(
                 name="combined_complex_loop_branch_endpoint",
                 description="Looped, branched, multi-endpoint glyph.",
                 condition=lambda facts, signature: (
@@ -506,22 +382,3 @@ class ScriLogRuleFactory:
                 ],
             )
         )
-
-        rules.append(
-            ScriLogRule(
-                name="combined_connected_cursive_like",
-                description="Two-sided, horizontal-ish, path-like glyph.",
-                condition=lambda facts, signature: (
-                    facts.has("family", "two_sided_exit")
-                    and (
-                        facts.has("family", "horizontal_dominant")
-                        or signature.direction_ratios.get("horizontal", 0.0) >= 0.30
-                    )
-                    and signature.endpoint_count in {2, 3, 4}
-                ),
-                action=lambda facts, signature: [
-                    _fact("family", "connected_cursive_like"),
-                ],
-            )
-        )
-

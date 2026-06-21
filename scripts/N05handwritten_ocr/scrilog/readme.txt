@@ -66,6 +66,48 @@ Scrilog evaluates all classes. It does not begin from ANTAR's shortlist. This
 preserves an independent failure pattern, which is essential for later
 mixture-of-experts agreement.
 
+Expected Topology Contract
+--------------------------
+Scrilog Lab stores human-reviewed canonical geometry in:
+
+    datasets/scrilog/scrilog_annotations.json
+
+Each record uses `expected_signature`. ScribeTrace emits the matching observed
+geometry under `metrics.scrilog_observation`; reconstructed hypotheses also
+carry `scrilog_observation`, and reconstruction exposes the selected value as
+`selected_scrilog_observation`.
+
+The v2 contract keeps visual ink holes separate from closed skeleton loops and
+records endpoints and logical junction clusters by glyph-relative quadrant.
+Quadrant totals must equal their corresponding global counts. Border contacts
+are objective mask-edge measurements. Loop, branch, wide, and tall families
+are derived rather than independently entered where possible.
+
+The discarded ascender, descender, left-exit, and right-exit flags are not part
+of this contract. They depended on unstable semantic guesses from endpoint
+half-ratios and could not provide reliable expected-versus-observed deltas.
+
+Scrististics can therefore compare:
+
+    expected_signature - selected_scrilog_observation
+
+per true letter, damage condition, writer, and reconstruction decision without
+changing ANTAR's frozen 104-feature model schema.
+
+Evidence Importance Policy
+--------------------------
+The annotation document stores one global `evidence_policy` rather than
+duplicating weights in every letter record. Each expected field has a high,
+medium, or low importance tier, a numeric weight, and an exact `observed_path`
+inside `reconstruction.selected_scrilog_observation`.
+
+High evidence covers stable structural identity such as holes, closed loops,
+endpoint count, junction clusters, components, and coarse shape. Medium
+evidence covers paths, isolated/short fragments, and objective border contact.
+Low evidence covers endpoint and junction quadrants. Damage-aware reliability
+is applied separately later; importance must never be mistaken for confidence
+in one damaged observation.
+
 Reasoning Model
 ---------------
 Each Armenian class will have a versioned rule profile containing several
