@@ -14,6 +14,7 @@ from .scrilog import (
     ScriLogRuleFactory,
     ScriLogSignature,
     ScriLogSignatureBuilder,
+    ScrististicsEvidenceAdapter,
     run_scrilog_on_file,
     run_scrilog_on_payload,
 )

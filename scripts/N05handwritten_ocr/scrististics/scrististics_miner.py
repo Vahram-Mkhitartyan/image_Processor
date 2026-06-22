@@ -46,13 +46,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import sys
+import tempfile
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
-SCRISTISTICS_VERSION = "0.1"
+SCRISTISTICS_VERSION = "0.2"
+IMAGE_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 
 
 # ============================================================
@@ -166,6 +171,24 @@ def _json_value(value: Any) -> str:
         return "null"
 
     return str(value)
+
+
+def _restore_json_value(value: str) -> Any:
+    """Restore normalized counter values to useful JSON scalar types."""
+
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    if value == "null":
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        try:
+            return float(value)
+        except ValueError:
+            return value
 
 
 def _percent(
@@ -438,6 +461,13 @@ def extract_records(payload: Any) -> List[Dict[str, Any]]:
                     if isinstance(record, dict)
                 ]
 
+            if isinstance(value, dict):
+                return [
+                    record
+                    for record in value.values()
+                    if isinstance(record, dict)
+                ]
+
         return [payload]
 
     return []
@@ -524,11 +554,23 @@ def extract_observed_payload(record: Dict[str, Any]) -> Dict[str, Any]:
             "scrilog_auto",
             "auto_detected",
             "signature",
+            "scrilog_observation",
+            "selected_scrilog_observation",
         ],
     )
 
     if observed:
         return observed
+
+    reconstruction = _safe_dict(record.get("reconstruction"))
+    selected = reconstruction.get("selected_scrilog_observation")
+    if isinstance(selected, dict) and selected:
+        return selected
+
+    metrics = _safe_dict(record.get("metrics"))
+    metric_observation = metrics.get("scrilog_observation")
+    if isinstance(metric_observation, dict) and metric_observation:
+        return metric_observation
 
     # Fallback:
     # the record itself may already be flat.
@@ -556,6 +598,7 @@ def extract_expected_payload(record: Dict[str, Any]) -> Dict[str, Any]:
             "ground_truth",
             "verified",
             "truth",
+            "expected_signature",
         ],
     )
 
@@ -610,8 +653,14 @@ def flatten_features(payload: Dict[str, Any]) -> Dict[str, Any]:
     core = _safe_dict(payload.get("core_topology"))
     endpoint_quadrants = _safe_dict(payload.get("endpoint_quadrants"))
     junction_quadrants = _safe_dict(payload.get("junction_quadrants"))
-    contacts = _safe_dict(payload.get("objective_contacts"))
-    shape = _safe_dict(payload.get("shape_family"))
+    contacts = (
+        _safe_dict(payload.get("objective_contacts"))
+        or _safe_dict(payload.get("border_contacts"))
+    )
+    shape = (
+        _safe_dict(payload.get("shape_family"))
+        or _safe_dict(payload.get("derived_families"))
+    )
 
     # --------------------------------------------------------
     # Core topology
@@ -1072,16 +1121,29 @@ class ClassStats:
     sample_count: int = 0
     feature_distributions: Dict[str, FeatureDistribution] = field(default_factory=dict)
     error_distributions: Dict[str, ErrorDistribution] = field(default_factory=dict)
+    joint_signatures: Counter = field(default_factory=Counter)
+    joint_signature_sources: Dict[str, str] = field(default_factory=dict)
 
     def add_observed(
         self,
         observed_features: Dict[str, Any],
+        source_id: str = "",
     ) -> None:
         """
         Add one traced/observed sample into this class profile.
         """
 
         self.sample_count += 1
+
+        signature_key = json.dumps(
+            observed_features,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        self.joint_signatures[signature_key] += 1
+        if signature_key not in self.joint_signature_sources and source_id:
+            self.joint_signature_sources[signature_key] = source_id
 
         for feature_name, value in observed_features.items():
             importance = FEATURE_IMPORTANCE.get(
@@ -1096,6 +1158,41 @@ class ClassStats:
                 )
 
             self.feature_distributions[feature_name].add(value)
+
+    def modal_feature_standard(self) -> Dict[str, Dict[str, Any]]:
+        """Return each feature's most frequent value and empirical support."""
+
+        standard: Dict[str, Dict[str, Any]] = {}
+        for feature_name, distribution in sorted(self.feature_distributions.items()):
+            if not distribution.counts:
+                continue
+            value, count = distribution.counts.most_common(1)[0]
+            standard[feature_name] = {
+                "value": _restore_json_value(value),
+                "count": int(count),
+                "support_percent": _percent(count, distribution.total()),
+                "importance": distribution.importance,
+            }
+        return standard
+
+    def empirical_variants(self, limit: int = 3) -> List[Dict[str, Any]]:
+        """Return common correlated signatures backed by real source glyphs."""
+
+        variants: List[Dict[str, Any]] = []
+        for rank, (signature_key, count) in enumerate(
+            self.joint_signatures.most_common(max(1, int(limit))),
+            start=1,
+        ):
+            variants.append(
+                {
+                    "rank": rank,
+                    "source_id": self.joint_signature_sources.get(signature_key),
+                    "count": int(count),
+                    "support_percent": _percent(count, self.sample_count),
+                    "observed_signature": json.loads(signature_key),
+                }
+            )
+        return variants
 
     def add_expected_vs_observed(
         self,
@@ -1306,6 +1403,17 @@ class ClassStats:
             "raw_class_id": self.raw_class_id,
             "sample_count": self.sample_count,
 
+            "empirical_standard": {
+                "method": "joint_mode_with_feature_modes",
+                "representative": (
+                    self.empirical_variants(limit=1)[0]
+                    if self.joint_signatures
+                    else None
+                ),
+                "variants": self.empirical_variants(limit=3),
+                "modal_features": self.modal_feature_standard(),
+            },
+
             "common_observations": self.common_observations(
                 threshold_percent=common_threshold,
             ),
@@ -1440,6 +1548,12 @@ class ScriStisticsMiner:
 
         class_stats.add_observed(
             observed_features=observed_features,
+            source_id=str(
+                record.get("source_id")
+                or record.get("sample_id")
+                or record.get("image_path")
+                or ""
+            ),
         )
 
         if expected_features:
@@ -1762,6 +1876,182 @@ def run_miner(
     return result
 
 
+def _natural_key(value: str) -> Tuple[Any, ...]:
+    """Sort numeric class and image names in human order."""
+
+    return tuple(
+        int(part) if part.isdigit() else part.lower()
+        for part in re.split(r"(\d+)", value)
+    )
+
+
+def _collect_matenadata_images(
+    dataset_path: Path,
+    limit_per_class: Optional[int],
+) -> List[Tuple[str, Path]]:
+    """Collect deterministic labeled glyph paths from class directories."""
+
+    samples: List[Tuple[str, Path]] = []
+    class_dirs = sorted(
+        (path for path in dataset_path.iterdir() if path.is_dir()),
+        key=lambda path: _natural_key(path.name),
+    )
+    for class_dir in class_dirs:
+        images = sorted(
+            (
+                path
+                for path in class_dir.iterdir()
+                if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+            ),
+            key=lambda path: _natural_key(path.name),
+        )
+        if limit_per_class is not None:
+            images = images[:limit_per_class]
+        samples.extend((class_dir.name, image_path) for image_path in images)
+    return samples
+
+
+def _selected_scrilog_observation(trace_result: Any) -> Dict[str, Any]:
+    """Return topology from the selected reconstruction, then original trace."""
+
+    reconstruction = _safe_dict(getattr(trace_result, "reconstruction", None))
+    selected = reconstruction.get("selected_scrilog_observation")
+    if isinstance(selected, dict) and selected:
+        return selected
+    metrics = _safe_dict(getattr(trace_result, "metrics", None))
+    return _safe_dict(metrics.get("scrilog_observation"))
+
+
+def run_matenadata_miner(
+    dataset_path: Path,
+    output_path: Path,
+    limit_per_class: Optional[int] = None,
+    enable_reconstruction: bool = True,
+    progress_every: int = 100,
+    common_threshold: int = 70,
+    secondary_threshold: int = 30,
+    minor_error_threshold: int = 3,
+    common_error_threshold: int = 10,
+) -> Dict[str, Any]:
+    """Mine empirical class prototypes directly from labeled glyph images."""
+
+    if not dataset_path.is_dir():
+        raise FileNotFoundError(f"Matenadata directory does not exist: {dataset_path}")
+
+    scripts_dir = Path(__file__).resolve().parents[2]
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    from N05handwritten_ocr.scribetrace.expert import run_scribetrace
+    from N05handwritten_ocr.scribetrace.trace_models import TraceInput
+
+    samples = _collect_matenadata_images(dataset_path, limit_per_class)
+    if not samples:
+        raise ValueError(f"No supported glyph images found in: {dataset_path}")
+
+    miner = ScriStisticsMiner(
+        common_threshold=common_threshold,
+        secondary_threshold=secondary_threshold,
+        minor_error_threshold=minor_error_threshold,
+        common_error_threshold=common_error_threshold,
+    )
+    settings = {
+        "enabled": True,
+        "save_debug": False,
+        "save_json": False,
+        "enable_mask_repair": False,
+        "ink_threshold_mode": "otsu",
+        "minimum_ink_pixels": 4,
+        "enable_theoretical_reconstruction": bool(enable_reconstruction),
+        "reconstruction_use_recognition_verification": False,
+    }
+    started = time.perf_counter()
+    successful = 0
+    failures: List[Dict[str, Any]] = []
+    feature_source_counts: Counter = Counter()
+    scratch_directory = tempfile.TemporaryDirectory(prefix="scrististics_trace_")
+
+    for index, (class_id, image_path) in enumerate(samples, start=1):
+        source_id = image_path.relative_to(dataset_path).as_posix()
+        trace_result = run_scribetrace(
+            TraceInput(
+                crop_path=str(image_path),
+                mask_crop_path=str(image_path),
+                visual_crop_path=str(image_path),
+                output_dir=scratch_directory.name,
+                document_id="matenadata_empirical_profiles",
+                # Reuse one artifact name so unavoidable reconstruction previews
+                # overwrite each other instead of growing with the dataset.
+                text_unit_id="scrististics_active_sample",
+                layer="matenadata_clean",
+            ),
+            settings=settings,
+        )
+        observation = _selected_scrilog_observation(trace_result)
+        if trace_result.status != "completed" or not observation:
+            if len(failures) < 200:
+                failures.append(
+                    {
+                        "source_id": source_id,
+                        "class_id": class_id,
+                        "status": trace_result.status,
+                        "error": trace_result.error,
+                    }
+                )
+            continue
+
+        # Aspect-ratio slenderness is not our structural double-tail definition.
+        derived = _safe_dict(observation.get("derived_families"))
+        if "is_tall" in derived:
+            observation = dict(observation)
+            observation["derived_families"] = dict(derived)
+            observation["derived_families"].pop("is_tall", None)
+
+        miner.add_record(
+            {
+                "class_label": class_id,
+                "source_id": source_id,
+                "observed": observation,
+            }
+        )
+        successful += 1
+        feature_source_counts[
+            str(trace_result.metrics.get("active_feature_source", "original"))
+        ] += 1
+
+        if progress_every > 0 and (
+            index % progress_every == 0 or index == len(samples)
+        ):
+            elapsed = time.perf_counter() - started
+            rate = index / elapsed if elapsed > 0 else 0.0
+            print(
+                f"[{index}/{len(samples)}] traced={successful} "
+                f"failed={index - successful} rate={rate:.1f}/s"
+            )
+
+    scratch_directory.cleanup()
+
+    result = miner.to_dict()
+    result["profile_kind"] = "empirical_observed_topology"
+    result["empirical_mining"] = {
+        "dataset_path": str(dataset_path.resolve()),
+        "selected_sample_count": len(samples),
+        "successful_sample_count": successful,
+        "failed_sample_count": len(samples) - successful,
+        "limit_per_class": limit_per_class,
+        "reconstruction_enabled": bool(enable_reconstruction),
+        "feature_source_counts": dict(sorted(feature_source_counts.items())),
+        "excluded_automatic_features": {
+            "tall_shape": "Requires structural double-tail evidence; aspect ratio is insufficient."
+        },
+        "elapsed_seconds": time.perf_counter() - started,
+        "failures": failures,
+        "failures_truncated": len(samples) - successful > len(failures),
+    }
+    result["minor_error_watchlist"] = []
+    _write_json(output_path, result)
+    return result
+
+
 # ============================================================
 # CLI
 # ============================================================
@@ -1775,10 +2065,16 @@ def build_cli_parser() -> argparse.ArgumentParser:
         description="Mine ScriStistics profiles from ScriLog annotation JSON."
     )
 
-    parser.add_argument(
+    source_group = parser.add_mutually_exclusive_group(required=True)
+
+    source_group.add_argument(
         "--input",
-        required=True,
         help="Input annotation JSON file or directory.",
+    )
+
+    source_group.add_argument(
+        "--matenadata",
+        help="Labeled Matenadata root to trace and mine automatically.",
     )
 
     parser.add_argument(
@@ -1835,6 +2131,26 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="Increase percent needed to flag a rising minor error.",
     )
 
+    parser.add_argument(
+        "--limit-per-class",
+        type=int,
+        default=-1,
+        help="Matenadata images per class; -1 processes every image.",
+    )
+
+    parser.add_argument(
+        "--without-reconstruction",
+        action="store_true",
+        help="Mine original traces instead of selected reconstruction traces.",
+    )
+
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=100,
+        help="Print Matenadata progress after this many images; 0 disables it.",
+    )
+
     return parser
 
 
@@ -1846,32 +2162,49 @@ def main() -> None:
     parser = build_cli_parser()
     args = parser.parse_args()
 
-    previous_path: Optional[Path] = None
-
-    if args.previous:
-        previous_path = Path(args.previous)
-
-    result = run_miner(
-        input_path=Path(args.input),
-        output_path=Path(args.out),
-        previous_path=previous_path,
-        common_threshold=args.common_threshold,
-        secondary_threshold=args.secondary_threshold,
-        minor_error_threshold=args.minor_error_threshold,
-        common_error_threshold=args.common_error_threshold,
-        watch_percent=args.watch_percent,
-        trend_delta_percent=args.trend_delta_percent,
-    )
+    if args.matenadata:
+        limit_per_class = (
+            None if args.limit_per_class < 0 else args.limit_per_class
+        )
+        if limit_per_class == 0:
+            parser.error("--limit-per-class must be -1 or a positive integer")
+        result = run_matenadata_miner(
+            dataset_path=Path(args.matenadata),
+            output_path=Path(args.out),
+            limit_per_class=limit_per_class,
+            enable_reconstruction=not args.without_reconstruction,
+            progress_every=max(0, args.progress_every),
+            common_threshold=args.common_threshold,
+            secondary_threshold=args.secondary_threshold,
+            minor_error_threshold=args.minor_error_threshold,
+            common_error_threshold=args.common_error_threshold,
+        )
+    else:
+        previous_path: Optional[Path] = None
+        if args.previous:
+            previous_path = Path(args.previous)
+        result = run_miner(
+            input_path=Path(args.input),
+            output_path=Path(args.out),
+            previous_path=previous_path,
+            common_threshold=args.common_threshold,
+            secondary_threshold=args.secondary_threshold,
+            minor_error_threshold=args.minor_error_threshold,
+            common_error_threshold=args.common_error_threshold,
+            watch_percent=args.watch_percent,
+            trend_delta_percent=args.trend_delta_percent,
+        )
 
     status = {
         "status": "completed",
         "output_path": args.out,
-        "loaded_files": result["summary"]["loaded_files"],
+        "loaded_files": result["summary"].get("loaded_files", 0),
         "class_count": result["summary"]["class_count"],
         "sample_count": result["summary"]["sample_count"],
         "skipped_records": result["summary"]["skipped_records"],
         "unknown_label_records": result["summary"]["unknown_label_records"],
         "watchlist_count": len(result.get("minor_error_watchlist", [])),
+        "profile_kind": result.get("profile_kind", "json_annotations"),
     }
 
     print(

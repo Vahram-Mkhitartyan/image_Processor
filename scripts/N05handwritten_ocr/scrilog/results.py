@@ -28,6 +28,7 @@ class ScriLogCandidateEffect:
     effect: str
     strength: float
     reason: str
+    provenance: str = "scrilog_symbolic_profile"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -35,6 +36,7 @@ class ScriLogCandidateEffect:
             "effect": self.effect,
             "strength": self.strength,
             "reason": self.reason,
+            "provenance": self.provenance,
         }
 
 
@@ -65,6 +67,7 @@ class ScriLogResult:
     warnings: List[str] = field(default_factory=list)
     candidate_effects: List[ScriLogCandidateEffect] = field(default_factory=list)
     explanation: List[str] = field(default_factory=list)
+    statistical_evidence: Dict[str, Any] = field(default_factory=dict)
 
     engine_passes: int = 0
     rule_fire_count: int = 0
@@ -162,6 +165,8 @@ class ScriLogResult:
             ],
 
             "explanation": list(dict.fromkeys(self.explanation)),
+
+            "statistical_evidence": self.statistical_evidence,
 
             "status": {
                 "has_warnings": self.has_warnings,

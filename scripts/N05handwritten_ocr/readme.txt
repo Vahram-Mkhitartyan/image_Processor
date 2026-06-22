@@ -19,7 +19,12 @@ Current Status
 --------------
 The orchestration and input-map contract are active in main.py and the full
 pipeline. Expert execution remains disabled in settings.json while the
-recognizers are built, so normal N05 pipeline records remain placeholders.
+recognizers are validated, so normal N05 pipeline records remain placeholders.
+
+The character-detector CNN is implemented and can run standalone against one
+glyph crop. It returns the shared N05 top-k candidate schema plus model,
+preprocessing, margin, entropy, and provenance evidence. It remains disabled in
+the integrated pipeline until character segmentation is selected.
 
 ScribeTrace has progressed beyond its placeholder contract and can run
 standalone. It now converts exact N02 masks through components, Zhang-Suen
@@ -60,8 +65,8 @@ Expert Structure
         character recognition are the next stages.
 
     character_detector/
-        Character-level Armenian detector being remade from the current glyph
-        OCR work. This folder owns numeric_label_map.json and scan_matenadata.py.
+        Implemented PyTorch pixel-CNN for one Armenian glyph. This folder owns
+        inference.py, model.py, numeric_label_map.json, and scan_matenadata.py.
 
     word_level_ocr/
         Whole-word recognition expert.
@@ -155,6 +160,7 @@ Character-level training assets live under:
 
     character_detector/numeric_label_map.json
     character_detector/scan_matenadata.py
+    models/glyph_classifier_v0_1/glyph_classifier_v0_1_best.pt
 
 Training and evaluation programs remain in Cyber_Lin_Kuei_Assembly.
 

@@ -14,6 +14,9 @@ const state = {
   scrilogIndex: 0,
   scrilogClassFilter: "",
   scrilogDirty: false,
+  scrististicsLoaded: false,
+  scrististicsClass: "",
+  scrististicsFeature: "endpoints",
   activeView: "artifact-trace",
   previewZoom: 1,
   previewPanX: 0,
@@ -84,6 +87,17 @@ const elements = {
   scrilogSourceId: document.querySelector("#scrilog-source-id"),
   scrilogStatus: document.querySelector("#scrilog-status"),
   scrilogTotal: document.querySelector("#scrilog-total"),
+  scrististicsChart: document.querySelector("#scrististics-chart"),
+  scrististicsChartTitle: document.querySelector("#scrististics-chart-title"),
+  scrististicsClass: document.querySelector("#scrististics-class"),
+  scrististicsClassBadge: document.querySelector("#scrististics-class-badge"),
+  scrististicsDatasetSummary: document.querySelector("#scrististics-dataset-summary"),
+  scrististicsFeature: document.querySelector("#scrististics-feature"),
+  scrististicsKeyMetrics: document.querySelector("#scrististics-key-metrics"),
+  scrististicsMode: document.querySelector("#scrististics-mode"),
+  scrististicsProfilePath: document.querySelector("#scrististics-profile-path"),
+  scrististicsRefresh: document.querySelector("#scrististics-refresh"),
+  scrististicsVariants: document.querySelector("#scrististics-variants"),
   traceTitle: document.querySelector("#trace-title"),
   trainingRuns: document.querySelector("#training-runs"),
   trainingSummary: document.querySelector("#training-summary"),
@@ -249,6 +263,9 @@ function setWorkspaceView(viewId) {
   }
   if (viewId === "scrilog-lab" && !state.scrilogLoaded) {
     loadScrilogWorkspace(0);
+  }
+  if (viewId === "scrilog-lab" && !state.scrististicsLoaded) {
+    loadScrististicsDistribution();
   }
 }
 
@@ -1376,6 +1393,156 @@ async function exportScrilogJson() {
   }
 }
 
+function scrististicsValueLabel(value) {
+  return Number.isInteger(value) ? value.toString() : value.toFixed(1);
+}
+
+function renderScrististicsCurve(points) {
+  if (!points.length) {
+    return '<div class="scrististics-empty">No numeric observations for this attribute.</div>';
+  }
+  const width = 760;
+  const height = 300;
+  const padding = { left: 58, right: 24, top: 24, bottom: 48 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const values = points.map((point) => Number(point.value));
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const maximumPercent = Math.max(...points.map((point) => point.percent), 1);
+  const yMaximum = Math.max(10, Math.ceil(maximumPercent / 10) * 10);
+  const xPosition = (value, index) => {
+    if (maxValue === minValue) return padding.left + plotWidth / 2;
+    return padding.left + ((value - minValue) / (maxValue - minValue)) * plotWidth;
+  };
+  const yPosition = (percent) => (
+    padding.top + plotHeight - (percent / yMaximum) * plotHeight
+  );
+  const coordinates = points.map((point, index) => ({
+    ...point,
+    x: xPosition(Number(point.value), index),
+    y: yPosition(point.percent),
+  }));
+  const linePath = coordinates.map((point, index) => (
+    `${index ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`
+  )).join(" ");
+  const baseY = padding.top + plotHeight;
+  const areaPath = (
+    `M${coordinates[0].x.toFixed(1)},${baseY.toFixed(1)} `
+    + `${linePath} L${coordinates.at(-1).x.toFixed(1)},${baseY.toFixed(1)} Z`
+  );
+  const grid = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+    const y = padding.top + plotHeight - ratio * plotHeight;
+    const label = Math.round(ratio * yMaximum);
+    return `
+      <line class="scrististics-grid" x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}"></line>
+      <text class="scrististics-y-label" x="${padding.left - 10}" y="${y + 3}" text-anchor="end">${label}%</text>
+    `;
+  }).join("");
+  const stems = coordinates.map((point) => `
+    <line class="scrististics-stem" x1="${point.x}" y1="${baseY}" x2="${point.x}" y2="${point.y}"></line>
+  `).join("");
+  const dots = coordinates.map((point) => `
+    <g class="scrististics-point">
+      <circle cx="${point.x}" cy="${point.y}" r="5"></circle>
+      <title>value ${scrististicsValueLabel(Number(point.value))}: ${point.percent}% (${point.count} samples)</title>
+    </g>
+  `).join("");
+  const labels = coordinates.map((point, index) => {
+    if (coordinates.length > 16 && index % Math.ceil(coordinates.length / 12) !== 0) return "";
+    return `<text class="scrististics-x-label" x="${point.x}" y="${height - 18}" text-anchor="middle">${scrististicsValueLabel(Number(point.value))}</text>`;
+  }).join("");
+  return `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Empirical topology distribution">
+      <defs>
+        <linearGradient id="scrististics-area-gradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#47b58b" stop-opacity="0.42"></stop>
+          <stop offset="100%" stop-color="#47b58b" stop-opacity="0.02"></stop>
+        </linearGradient>
+      </defs>
+      ${grid}
+      <line class="scrististics-axis" x1="${padding.left}" y1="${baseY}" x2="${width - padding.right}" y2="${baseY}"></line>
+      ${stems}
+      <path class="scrististics-area" d="${areaPath}"></path>
+      <path class="scrististics-curve" d="${linePath}"></path>
+      ${dots}
+      ${labels}
+    </svg>
+  `;
+}
+
+function renderScrististicsDistribution(payload) {
+  state.scrististicsLoaded = true;
+  state.scrististicsClass = payload.selected_class.class_id;
+  state.scrististicsFeature = payload.selected_feature.name;
+
+  const previousClass = elements.scrististicsClass.value;
+  const previousFeature = elements.scrististicsFeature.value;
+  elements.scrististicsClass.innerHTML = payload.classes.map((row) => (
+    `<option value="${escapeHtml(row.class_id)}">${escapeHtml(row.class_id)} · ${escapeHtml(row.label)}</option>`
+  )).join("");
+  elements.scrististicsFeature.innerHTML = payload.features.map((row) => (
+    `<option value="${escapeHtml(row.name)}">${escapeHtml(row.label)}</option>`
+  )).join("");
+  elements.scrististicsClass.value = payload.selected_class.class_id || previousClass;
+  elements.scrististicsFeature.value = payload.selected_feature.name || previousFeature;
+
+  elements.scrististicsProfilePath.textContent = payload.profile_path;
+  elements.scrististicsDatasetSummary.textContent = (
+    `${payload.dataset_sample_count.toLocaleString()} traced glyphs · `
+    + `${payload.dataset_class_count} Armenian classes · `
+    + `${Math.round(payload.elapsed_seconds / 60)} min mining run`
+  );
+  elements.scrististicsClassBadge.textContent = (
+    `CLASS ${payload.selected_class.class_id} · ${payload.selected_class.label}`
+  );
+  elements.scrististicsChartTitle.textContent = payload.selected_feature.label;
+  elements.scrististicsMode.textContent = (
+    `MODE ${payload.selected_feature.most_common_value ?? "—"}`
+  );
+  elements.scrististicsChart.innerHTML = renderScrististicsCurve(
+    payload.selected_feature.points || [],
+  );
+
+  elements.scrististicsKeyMetrics.innerHTML = `
+    <div><strong>${payload.selected_class.sample_count.toLocaleString()}</strong><span>class samples</span></div>
+    <div><strong>${payload.representative.support_percent}%</strong><span>joint-mode support</span></div>
+    <div><strong>${payload.selected_feature.points.length}</strong><span>observed values</span></div>
+    <div><strong>${escapeHtml(payload.selected_feature.importance)}</strong><span>feature tier</span></div>
+  `;
+  elements.scrististicsVariants.innerHTML = payload.variants.length
+    ? payload.variants.map((variant) => `
+        <article>
+          <span>V${variant.rank}</span>
+          <div>
+            <strong>${escapeHtml(variant.source_id || "unknown source")}</strong>
+            <small>${variant.support_percent}% support · ${variant.count.toLocaleString()} glyphs</small>
+          </div>
+        </article>
+      `).join("")
+    : '<div class="scrististics-empty">No joint variants available.</div>';
+}
+
+async function loadScrististicsDistribution() {
+  elements.scrististicsChart.innerHTML = (
+    '<div class="scrististics-empty">Reading empirical topology profiles...</div>'
+  );
+  const params = new URLSearchParams({
+    class: state.scrististicsClass,
+    feature: state.scrististicsFeature,
+  });
+  try {
+    renderScrististicsDistribution(
+      await requestJson(`/api/scrististics-distribution?${params}`),
+    );
+  } catch (error) {
+    elements.scrististicsChart.innerHTML = (
+      `<div class="scrististics-empty error">${escapeHtml(error.message)}</div>`
+    );
+    showToast(error.message, true);
+  }
+}
+
 function renderTrainingChart(history) {
   if (!history?.length) {
     return '<div class="training-chart-empty">No epoch history saved yet.</div>';
@@ -1625,6 +1792,18 @@ elements.scrilogReset.addEventListener("click", () => {
   setScrilogDirty(true);
 });
 elements.scrilogNotes.addEventListener("input", () => setScrilogDirty(true));
+elements.scrististicsClass.addEventListener("change", () => {
+  state.scrististicsClass = elements.scrististicsClass.value;
+  loadScrististicsDistribution();
+});
+elements.scrististicsFeature.addEventListener("change", () => {
+  state.scrististicsFeature = elements.scrististicsFeature.value;
+  loadScrististicsDistribution();
+});
+elements.scrististicsRefresh.addEventListener("click", () => {
+  state.scrististicsLoaded = false;
+  loadScrististicsDistribution();
+});
 elements.sampleDetailBackdrop.addEventListener("click", closeSampleDetail);
 elements.sampleDetailClose.addEventListener("click", closeSampleDetail);
 document.addEventListener("keydown", (event) => {

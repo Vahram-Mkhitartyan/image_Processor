@@ -94,6 +94,31 @@ Scrististics can therefore compare:
 per true letter, damage condition, writer, and reconstruction decision without
 changing ANTAR's frozen 104-feature model schema.
 
+Scrististics Evidence Bridge
+----------------------------
+Scrilog consumes empirical profiles through scrististics_adapter.py. The
+adapter reads the selected post-reconstruction topology, evaluates all 78 class
+distributions, and emits a calibrated relative posterior plus bounded candidate
+effects.
+
+The boundary is strict:
+
+    Scrilog facts
+        describe geometry that ScribeTrace actually measured
+
+    Scrististics evidence
+        describes how plausible those measurements are for each class
+
+Scrististics never inserts, removes, or rewrites a Scrilog fact. It can emit
+only soft boost or weaken effects; it cannot emit block. At most five boosts
+and five weakens enter the normal candidate-effect list. Full compact class
+scores remain under statistical_evidence for later N05 fusion.
+
+The adapter uses feature importance and empirical modal stability, smooths
+unseen values, combines evidence in log space, and applies a temperature before
+normalizing across classes. Every effect records
+provenance=scrististics_empirical_profile.
+
 Evidence Importance Policy
 --------------------------
 The annotation document stores one global `evidence_policy` rather than

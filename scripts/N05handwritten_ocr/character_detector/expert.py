@@ -1,45 +1,99 @@
-"""Character-level Armenian recognition expert contract."""
+"""Character-level Armenian pixel-CNN expert and standalone JSON CLI."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from N05handwritten_ocr.character_detector.inference import predict
+else:
+    from .inference import predict
+
 
 EXPERT_NAME = "character_detector"
 
 
 def get_expert_manifest(settings=None):
-    """Describe the character detector and its migrated training assets.
-
-    Args:
-        settings: Optional expert settings dictionary.
-
-    Returns:
-        Expert capability and implementation-status metadata.
-    """
+    """Describe the implemented letter-level CNN expert."""
     settings = settings or {}
     return {
         "expert_name": EXPERT_NAME,
-        "display_name": "Character Detector",
+        "display_name": "Character Detector CNN",
         "enabled": bool(settings.get("enabled", False)),
-        "implemented": False,
-        "status": "awaiting_current_ocr_remake",
+        "implemented": True,
+        "status": "pixel_cnn_ready",
         "unit_level": "character",
-        "label_map": "numeric_label_map.json",
+        "returns_text": True,
+        "candidate_schema": "n05_candidate_evidence_v1",
+        "model_name": "glyph_classifier_v0_1",
+        "recommended_input": "single_character_analysis_mask",
     }
 
 
 def recognize(crop_path, context=None, settings=None):
-    """Return a non-attempted result until the current OCR is remade here.
+    """Recognize one glyph and return the shared N05 expert contract."""
+    settings = settings or {}
+    if not bool(settings.get("enabled", False)):
+        return {
+            "expert_name": EXPERT_NAME,
+            "attempted": False,
+            "status": "disabled",
+            "crop_path": crop_path,
+            "candidates": [],
+            "evidence": None,
+            "error": None,
+        }
+    try:
+        evidence = predict(crop_path, settings=settings)
+        return {
+            "expert_name": EXPERT_NAME,
+            "attempted": True,
+            "status": "completed",
+            "crop_path": str(Path(crop_path).expanduser().resolve()),
+            "candidates": evidence["candidates"],
+            "evidence": evidence,
+            "error": None,
+        }
+    except Exception as error:
+        return {
+            "expert_name": EXPERT_NAME,
+            "attempted": True,
+            "status": "failed",
+            "crop_path": str(crop_path),
+            "candidates": [],
+            "evidence": None,
+            "error": str(error),
+        }
 
-    Args:
-        crop_path: Path to the character or text-unit crop.
-        context: Optional document and routing evidence.
-        settings: Optional expert settings dictionary.
 
-    Returns:
-        Standard expert-result dictionary.
-    """
-    return {
-        "expert_name": EXPERT_NAME,
-        "attempted": False,
-        "status": "awaiting_current_ocr_remake",
-        "crop_path": crop_path,
-        "candidates": [],
-        "error": None,
-    }
+def main():
+    """Run one image through the CNN and optionally save JSON evidence."""
+    parser = argparse.ArgumentParser(description="Run Armenian glyph CNN inference.")
+    parser.add_argument("image", help="Character image or binary-mask path.")
+    parser.add_argument("--out", default="", help="Optional result JSON path.")
+    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--device", default="auto")
+    args = parser.parse_args()
+    result = recognize(
+        args.image,
+        settings={"enabled": True, "top_k": args.top_k, "device": args.device},
+    )
+    serialized = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+    if args.out:
+        output_path = Path(args.out).expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(serialized, encoding="utf-8")
+        print(output_path)
+    else:
+        print(serialized, end="")
+    if result["status"] != "completed":
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

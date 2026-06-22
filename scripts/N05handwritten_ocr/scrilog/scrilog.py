@@ -17,6 +17,7 @@ if __package__ in {None, ""}:
     from N05handwritten_ocr.scrilog.rules import ScriLogRuleFactory
     from N05handwritten_ocr.scrilog.signature import ScriLogSignature
     from N05handwritten_ocr.scrilog.signature_builder import ScriLogSignatureBuilder
+    from N05handwritten_ocr.scrilog.scrististics_adapter import ScrististicsEvidenceAdapter
 else:
     from .constants import *
     from .engine import ScriLogEngine, ScriLogRule
@@ -28,6 +29,7 @@ else:
     from .rules import ScriLogRuleFactory
     from .signature import ScriLogSignature
     from .signature_builder import ScriLogSignatureBuilder
+    from .scrististics_adapter import ScrististicsEvidenceAdapter
 
 __all__ = [
     "ScriLogCandidateEffect",
@@ -43,6 +45,7 @@ __all__ = [
     "ScriLogRuleFactory",
     "ScriLogSignature",
     "ScriLogSignatureBuilder",
+    "ScrististicsEvidenceAdapter",
     "build_cli_parser",
     "parse_json_file",
     "run_scrilog_on_file",

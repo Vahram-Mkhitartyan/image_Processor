@@ -298,6 +298,7 @@
             </div>
           </div>
         </section>
+
       </section>
 
       <section class="workspace-view" data-view-panel="scrilog-lab">
@@ -369,6 +370,62 @@
                 <button id="scrilog-save" class="scrilog-button">Save annotation</button>
               </div>
             </section>
+          </div>
+        </section>
+
+        <section class="scrististics-observatory">
+          <div class="scrististics-header">
+            <div>
+              <p class="eyebrow">SCRISTISTICS TOPOLOGY OBSERVATORY</p>
+              <h2>How Armenian geometry actually behaves</h2>
+              <small id="scrististics-profile-path">Waiting for an empirical profile...</small>
+            </div>
+            <button id="scrististics-refresh" class="scrilog-button secondary">Refresh profile</button>
+          </div>
+
+          <div class="scrististics-controls">
+            <label>
+              <span>Letter class</span>
+              <select id="scrististics-class"></select>
+            </label>
+            <label>
+              <span>Geometry attribute</span>
+              <select id="scrististics-feature"></select>
+            </label>
+            <div id="scrististics-dataset-summary" class="scrististics-dataset-summary">
+              Loading distributions...
+            </div>
+          </div>
+
+          <div class="scrististics-dashboard">
+            <article class="scrististics-chart-card">
+              <div class="scrististics-chart-heading">
+                <div>
+                  <span id="scrististics-class-badge">CLASS —</span>
+                  <h3 id="scrististics-chart-title">Topology distribution</h3>
+                </div>
+                <div id="scrististics-mode" class="scrististics-mode">MODE —</div>
+              </div>
+              <div id="scrististics-chart" class="scrististics-chart">
+                <div class="scrististics-empty">Select a topology attribute.</div>
+              </div>
+              <div class="scrististics-axis-note">
+                <span>Observed value</span>
+                <span>Share of class samples</span>
+              </div>
+            </article>
+
+            <aside class="scrististics-inspector">
+              <div class="scrististics-inspector-heading">
+                <p class="eyebrow">EMPIRICAL STANDARD</p>
+                <h3>Real variants, not guesses</h3>
+              </div>
+              <div id="scrististics-key-metrics" class="scrististics-key-metrics"></div>
+              <div>
+                <span class="scrististics-subheading">Strongest joint signatures</span>
+                <div id="scrististics-variants" class="scrististics-variants"></div>
+              </div>
+            </aside>
           </div>
         </section>
       </section>

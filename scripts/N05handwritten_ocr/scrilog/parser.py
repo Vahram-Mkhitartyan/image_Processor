@@ -12,6 +12,7 @@ from .results import ScriLogCandidateEffect, ScriLogResult
 from .rules import ScriLogRuleFactory
 from .signature import ScriLogSignature
 from .signature_builder import ScriLogSignatureBuilder
+from .scrististics_adapter import ScrististicsEvidenceAdapter
 
 class ScriLogParser:
     """
@@ -38,6 +39,7 @@ class ScriLogParser:
         self,
         rules: Optional[List[ScriLogRule]] = None,
         class_profiles: Optional[List[ScriLogClassProfile]] = None,
+        scrististics_adapter: Optional[ScrististicsEvidenceAdapter] = None,
         max_rule_passes: int = DEFAULT_MAX_RULE_PASSES,
     ) -> None:
         self.signature_builder = ScriLogSignatureBuilder()
@@ -49,6 +51,11 @@ class ScriLogParser:
 
         self.profile_evaluator = ScriLogProfileEvaluator(
             profiles=class_profiles,
+        )
+        self.scrististics_adapter = (
+            scrististics_adapter
+            if scrististics_adapter is not None
+            else ScrististicsEvidenceAdapter()
         )
 
     def parse_scribetrace_payload(
@@ -72,6 +79,10 @@ class ScriLogParser:
         warnings = facts.find_arg0("warning")
 
         candidate_effects = self.profile_evaluator.evaluate(facts)
+        statistical_evidence = self.scrististics_adapter.evaluate(payload)
+        candidate_effects.extend(
+            statistical_evidence.pop("candidate_effects", [])
+        )
 
         explanation = self._build_explanation(
             signature=signature,
@@ -88,6 +99,7 @@ class ScriLogParser:
             warnings=warnings,
             candidate_effects=candidate_effects,
             explanation=explanation,
+            statistical_evidence=statistical_evidence,
             engine_passes=engine_passes,
             rule_fire_count=rule_fire_count,
         )
