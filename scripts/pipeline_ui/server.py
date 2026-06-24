@@ -200,6 +200,14 @@ SCRISTISTICS_UI_FEATURES = {
     "closed_skeleton_loops": "Closed skeleton loops",
     "components": "Connected components",
     "trace_paths": "Trace paths",
+    "ink_bbox_width": "Ink bbox width",
+    "ink_bbox_height": "Ink bbox height",
+    "ink_aspect_ratio": "Ink aspect ratio",
+    "ink_bbox_area": "Ink bbox area",
+    "ink_pixel_count": "Ink pixels",
+    "ink_density": "Ink density",
+    "ink_center_x_ratio": "Ink center X",
+    "ink_center_y_ratio": "Ink center Y",
 }
 
 
@@ -797,24 +805,28 @@ class PipelineUiApplication:
             if str(record.get("raw_class_id", "unknown"))
             == selected_meta["class_id"]
         )
+        geometry_profile = selected.get("geometry_profile") or {}
+        is_geometry_feature = feature_name in geometry_profile
         distribution = (
-            (selected.get("feature_distributions") or {}).get(feature_name)
-            or {}
-        )
+            geometry_profile.get(feature_name)
+            if is_geometry_feature
+            else (selected.get("feature_distributions") or {}).get(feature_name)
+        ) or {}
         points = []
-        for row in distribution.get("values") or []:
-            try:
-                value = float(row.get("value"))
-            except (TypeError, ValueError):
-                continue
-            points.append(
-                {
-                    "value": value,
-                    "count": int(row.get("count", 0)),
-                    "percent": int(row.get("percent", 0)),
-                }
-            )
-        points.sort(key=lambda row: row["value"])
+        if not is_geometry_feature:
+            for row in distribution.get("values") or []:
+                try:
+                    value = float(row.get("value"))
+                except (TypeError, ValueError):
+                    continue
+                points.append(
+                    {
+                        "value": value,
+                        "count": int(row.get("count", 0)),
+                        "percent": int(row.get("percent", 0)),
+                    }
+                )
+            points.sort(key=lambda row: row["value"])
 
         standard = selected.get("empirical_standard") or {}
         representative = standard.get("representative") or {}
@@ -837,9 +849,31 @@ class PipelineUiApplication:
             "selected_feature": {
                 "name": feature_name,
                 "label": SCRISTISTICS_UI_FEATURES[feature_name],
-                "importance": distribution.get("importance", "unknown"),
+                "kind": "geometry" if is_geometry_feature else "topology",
+                "importance": (
+                    "geometry"
+                    if is_geometry_feature
+                    else distribution.get("importance", "unknown")
+                ),
                 "most_common_value": distribution.get("most_common_value"),
                 "points": points,
+                "summary": (
+                    {
+                        key: distribution.get(key)
+                        for key in [
+                            "total",
+                            "mean",
+                            "median",
+                            "min",
+                            "max",
+                            "p10",
+                            "p90",
+                            "stdev",
+                        ]
+                    }
+                    if is_geometry_feature
+                    else None
+                ),
             },
             "representative": {
                 "source_id": representative.get("source_id"),

@@ -1471,6 +1471,50 @@ function renderScrististicsCurve(points) {
   `;
 }
 
+function renderScrististicsGeometry(summary) {
+  if (!summary || summary.mean === null || summary.mean === undefined) {
+    return '<div class="scrististics-empty">No sizing observations for this attribute.</div>';
+  }
+  const min = Number(summary.min);
+  const max = Number(summary.max);
+  const markers = [
+    ["p10", "P10", summary.p10],
+    ["median", "Median", summary.median],
+    ["mean", "Mean", summary.mean],
+    ["p90", "P90", summary.p90],
+  ].filter(([, , value]) => value !== null && value !== undefined && !Number.isNaN(Number(value)));
+  const position = (value) => {
+    if (max === min) return 50;
+    return Math.max(0, Math.min(100, ((Number(value) - min) / (max - min)) * 100));
+  };
+  const markerMarkup = markers.map(([key, label, value]) => `
+    <span class="scrististics-geometry-marker ${key}" style="left:${position(value).toFixed(2)}%">
+      <i></i>
+      <strong>${escapeHtml(label)}</strong>
+      <small>${scrististicsValueLabel(Number(value))}</small>
+    </span>
+  `).join("");
+  return `
+    <div class="scrististics-geometry-card">
+      <div class="scrististics-geometry-scale">
+        <span>${scrististicsValueLabel(min)}</span>
+        <span>${scrististicsValueLabel(max)}</span>
+      </div>
+      <div class="scrististics-geometry-track">
+        <div class="scrististics-geometry-core" style="
+          left:${position(summary.p10).toFixed(2)}%;
+          width:${Math.max(1, position(summary.p90) - position(summary.p10)).toFixed(2)}%;
+        "></div>
+        ${markerMarkup}
+      </div>
+      <p>
+        Geometry profile is measured from the binary ink bounding box. Use this
+        for crop plausibility, not as a hard letter identity rule.
+      </p>
+    </div>
+  `;
+}
+
 function renderScrististicsDistribution(payload) {
   state.scrististicsLoaded = true;
   state.scrististicsClass = payload.selected_class.class_id;
@@ -1498,18 +1542,28 @@ function renderScrististicsDistribution(payload) {
   );
   elements.scrististicsChartTitle.textContent = payload.selected_feature.label;
   elements.scrististicsMode.textContent = (
-    `MODE ${payload.selected_feature.most_common_value ?? "—"}`
+    payload.selected_feature.kind === "geometry"
+      ? `MEAN ${scrististicsValueLabel(Number(payload.selected_feature.summary?.mean ?? 0))}`
+      : `MODE ${payload.selected_feature.most_common_value ?? "—"}`
   );
-  elements.scrististicsChart.innerHTML = renderScrististicsCurve(
-    payload.selected_feature.points || [],
-  );
+  elements.scrististicsChart.innerHTML = payload.selected_feature.kind === "geometry"
+    ? renderScrististicsGeometry(payload.selected_feature.summary)
+    : renderScrististicsCurve(payload.selected_feature.points || []);
 
-  elements.scrististicsKeyMetrics.innerHTML = `
-    <div><strong>${payload.selected_class.sample_count.toLocaleString()}</strong><span>class samples</span></div>
-    <div><strong>${payload.representative.support_percent}%</strong><span>joint-mode support</span></div>
-    <div><strong>${payload.selected_feature.points.length}</strong><span>observed values</span></div>
-    <div><strong>${escapeHtml(payload.selected_feature.importance)}</strong><span>feature tier</span></div>
-  `;
+  const geometrySummary = payload.selected_feature.summary || {};
+  elements.scrististicsKeyMetrics.innerHTML = payload.selected_feature.kind === "geometry"
+    ? `
+      <div><strong>${payload.selected_class.sample_count.toLocaleString()}</strong><span>class samples</span></div>
+      <div><strong>${scrististicsValueLabel(Number(geometrySummary.mean ?? 0))}</strong><span>mean</span></div>
+      <div><strong>${scrististicsValueLabel(Number(geometrySummary.median ?? 0))}</strong><span>median</span></div>
+      <div><strong>${scrististicsValueLabel(Number(geometrySummary.stdev ?? 0))}</strong><span>stdev</span></div>
+    `
+    : `
+      <div><strong>${payload.selected_class.sample_count.toLocaleString()}</strong><span>class samples</span></div>
+      <div><strong>${payload.representative.support_percent}%</strong><span>joint-mode support</span></div>
+      <div><strong>${payload.selected_feature.points.length}</strong><span>observed values</span></div>
+      <div><strong>${escapeHtml(payload.selected_feature.importance)}</strong><span>feature tier</span></div>
+    `;
   elements.scrististicsVariants.innerHTML = payload.variants.length
     ? payload.variants.map((variant) => `
         <article>

@@ -26,6 +26,14 @@
       "minimum_junction_distance_px": 2
     }
   },
+  "assembly": {
+    "segmentation": {
+      "max_segmentation_paths": 8
+    },
+    "letter_matrix": {
+      "top_k_per_position": 5
+    }
+  },
   "experts": {
     "tesseract_ocr": {
       "enabled": false
@@ -38,7 +46,24 @@
       "enabled": false
     },
     "word_level_ocr": {
-      "enabled": false
+      "enabled": true,
+      "backend": "simplehtr_ctc",
+      "decoder": "bestpath",
+      "model_path": "models/word_level_ocr_v0_1/word_level_ocr_v0_1.pt",
+      "char_list_path": "",
+      "corpus_path": "datasets/word_level_ocr/armenian_ctc_corpus.txt",
+      "word_frequency_path": "datasets/word_level_ocr/armenian_word_frequencies.tsv",
+      "max_language_words": 250000,
+      "top_k": 5,
+      "return_language_prior_when_model_missing": false,
+      "preprocessing": {
+        "target_height": 32,
+        "target_width": 128,
+        "dynamic_width": true,
+        "padding_px": 16,
+        "background_value": 255,
+        "normalize_range": "minus_one_to_one"
+      }
     }
   }
 }

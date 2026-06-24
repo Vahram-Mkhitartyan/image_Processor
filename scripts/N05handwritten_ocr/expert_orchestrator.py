@@ -5,19 +5,23 @@ import os
 import shutil
 
 try:
+    from .assembly import build_assembly_map
     from .character_unit_proposer import propose_character_units
     from .character_detector import get_expert_manifest as get_character_manifest
     from .scribetrace import get_expert_manifest as get_scribetrace_manifest
     from .scribetrace import recognize as recognize_scribetrace
     from .tesseract_ocr import get_expert_manifest as get_tesseract_manifest
     from .word_level_ocr import get_expert_manifest as get_word_level_manifest
+    from .word_level_ocr import recognize as recognize_word_level
 except ImportError:
+    from assembly import build_assembly_map
     from character_unit_proposer import propose_character_units
     from character_detector import get_expert_manifest as get_character_manifest
     from scribetrace import get_expert_manifest as get_scribetrace_manifest
     from scribetrace import recognize as recognize_scribetrace
     from tesseract_ocr import get_expert_manifest as get_tesseract_manifest
     from word_level_ocr import get_expert_manifest as get_word_level_manifest
+    from word_level_ocr import recognize as recognize_word_level
 
 
 NODE_NAME = "N05_handwriting_expert_orchestrator"
@@ -118,12 +122,14 @@ def create_output_folders(output_dir):
             "character_unit_proposer",
             "debug",
         ),
+        "assembly": os.path.join(output_dir, "assembly"),
     }
     ensure_dir(
         folders["root"],
         folders["metadata"],
         folders["scribetrace"],
         folders["scribetrace_debug"],
+        folders["assembly"],
     )
     return folders
 
@@ -435,6 +441,85 @@ def run_scribetrace_for_text_unit(handwritten_text_unit, settings):
     )
 
 
+def build_word_level_context_from_unit(handwritten_text_unit):
+    """Build context for whole-word OCR evidence."""
+
+    return {
+        "document_id": handwritten_text_unit.get("document_id"),
+        "text_unit_id": handwritten_text_unit.get("text_unit_id"),
+        "group_id": handwritten_text_unit.get("group_id"),
+        "layer": handwritten_text_unit.get("layer"),
+        "visual_class": handwritten_text_unit.get("visual_class"),
+        "document_bbox": handwritten_text_unit.get("document_bbox"),
+        "crop_bbox": handwritten_text_unit.get("crop_bbox"),
+        "character_unit_proposal_summary": {
+            "status": handwritten_text_unit.get("character_unit_proposal", {}).get(
+                "status"
+            ),
+            "recovery_needed": handwritten_text_unit.get(
+                "character_unit_proposal", {}
+            ).get("recovery_needed"),
+            "hypothesis_count": len(
+                handwritten_text_unit.get("character_unit_proposal", {}).get(
+                    "segmentation_hypotheses",
+                    [],
+                )
+            ),
+        },
+    }
+
+
+def run_word_level_ocr_for_text_unit(handwritten_text_unit, settings):
+    """Run word-level OCR on the original whole text-unit crop."""
+
+    crop_path = (
+        handwritten_text_unit.get("n05_copied_crop_path")
+        or handwritten_text_unit.get("n05_selected_crop_path")
+    )
+    if not crop_path:
+        return {
+            "expert_name": "word_level_ocr",
+            "attempted": False,
+            "status": "skipped",
+            "crop_path": None,
+            "context": build_word_level_context_from_unit(handwritten_text_unit),
+            "candidates": [],
+            "evidence": None,
+            "error": "No crop path available for word-level OCR.",
+        }
+
+    word_settings = settings.get("experts", {}).get("word_level_ocr", {})
+    return recognize_word_level(
+        crop_path=crop_path,
+        context=build_word_level_context_from_unit(handwritten_text_unit),
+        settings=word_settings,
+    )
+
+
+def attach_word_level_result(handwritten_text_unit, word_level_result):
+    """Attach whole-word OCR evidence for assembly consumption."""
+
+    handwritten_text_unit.setdefault("expert_outputs", {})
+    handwritten_text_unit["expert_outputs"]["word_level_ocr"] = word_level_result
+    evidence = word_level_result.get("evidence") or {}
+    prediction = evidence.get("prediction") or {}
+    handwritten_text_unit["word_level_ocr"] = {
+        "attempted": bool(word_level_result.get("attempted")),
+        "status": word_level_result.get("status"),
+        "text": prediction.get("text"),
+        "confidence": prediction.get("confidence"),
+        "decoded_length": prediction.get("decoded_length"),
+        "predicted_length": prediction.get("predicted_length"),
+        "predicted_bridge_count": prediction.get("predicted_bridge_count"),
+        "split_line_candidate_count": len(
+            prediction.get("split_line_candidates") or []
+        ),
+        "token_count": len(prediction.get("tokens") or []),
+        "error": word_level_result.get("error"),
+    }
+    return handwritten_text_unit
+
+
 def attach_scribetrace_result(handwritten_text_unit, scribetrace_result):
     """Attach whole-unit ScribeTrace evidence without changing OCR candidates."""
     handwritten_text_unit.setdefault("expert_outputs", {})
@@ -521,10 +606,22 @@ def summarize_handwritten_text_map(
             )
             for unit in handwritten_text_units
         ),
+        "word_level_ocr_attempted_count": sum(
+            bool(unit.get("word_level_ocr", {}).get("attempted"))
+            for unit in handwritten_text_units
+        ),
+        "word_level_ocr_completed_count": sum(
+            unit.get("word_level_ocr", {}).get("status") == "completed"
+            for unit in handwritten_text_units
+        ),
+        "word_level_ocr_token_count": sum(
+            int(unit.get("word_level_ocr", {}).get("token_count") or 0)
+            for unit in handwritten_text_units
+        ),
     }
 
 
-def print_summary(document_id, summary, metadata_path):
+def print_summary(document_id, summary, metadata_path, assembly_path=None):
     """Print a short N05 completion summary."""
     print("-------------------------")
     print("N05 handwritten text map completed.")
@@ -535,9 +632,13 @@ def print_summary(document_id, summary, metadata_path):
     print("Recovery flagged:", summary["character_unit_recovery_count"])
     print("Split hypotheses:", summary["character_unit_split_hypothesis_count"])
     print("Trace-validated split hints:", summary["character_unit_split_hint_count"])
+    print("Word OCR attempted:", summary["word_level_ocr_attempted_count"])
+    print("Word OCR completed:", summary["word_level_ocr_completed_count"])
     print("Skipped:", summary["skipped_count"])
     print("Failed:", summary["failed_count"])
     print("Metadata:", metadata_path)
+    if assembly_path:
+        print("Assembly:", assembly_path)
     print("-------------------------")
 
 
@@ -600,6 +701,15 @@ def build_handwriting_expert_map(
                 )
             )
 
+            word_level_result = run_word_level_ocr_for_text_unit(
+                handwritten_text_unit=handwritten_text_unit,
+                settings=settings,
+            )
+            attach_word_level_result(
+                handwritten_text_unit=handwritten_text_unit,
+                word_level_result=word_level_result,
+            )
+
             scribetrace_result = run_scribetrace_for_text_unit(
                 handwritten_text_unit=handwritten_text_unit,
                 settings=settings,
@@ -627,6 +737,16 @@ def build_handwriting_expert_map(
         skipped_records=skipped_records,
         failed_records=failed_records,
     )
+    assembly_map = build_assembly_map(
+        document_id=document_id,
+        handwritten_text_units=handwritten_text_units,
+        settings=settings.get("assembly", {}),
+    )
+    assembly_path = os.path.join(
+        folders["assembly"],
+        f"{document_id}_assembly.json",
+    )
+    save_json(assembly_map, assembly_path)
     result = {
         "node": NODE_NAME,
         "node_version": NODE_VERSION,
@@ -639,6 +759,8 @@ def build_handwriting_expert_map(
         "coordinate_space": "original_document_image",
         "expert_registry": build_expert_registry(settings),
         "summary": summary,
+        "assembly": assembly_map,
+        "assembly_path": assembly_path,
         "handwritten_text_units": handwritten_text_units,
         "skipped": skipped_records,
         "failed": failed_records,
@@ -649,7 +771,7 @@ def build_handwriting_expert_map(
     )
     save_json(result, metadata_path)
     result["metadata_path"] = metadata_path
-    print_summary(document_id, summary, metadata_path)
+    print_summary(document_id, summary, metadata_path, assembly_path=assembly_path)
     return result
 
 

@@ -55,9 +55,27 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+import cv2
+import numpy as np
+
 
 SCRISTISTICS_VERSION = "0.2"
 IMAGE_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
+
+GEOMETRY_FEATURES: Tuple[str, ...] = (
+    "image_width",
+    "image_height",
+    "ink_bbox_x",
+    "ink_bbox_y",
+    "ink_bbox_width",
+    "ink_bbox_height",
+    "ink_bbox_area",
+    "ink_pixel_count",
+    "ink_density",
+    "ink_aspect_ratio",
+    "ink_center_x_ratio",
+    "ink_center_y_ratio",
+)
 
 
 # ============================================================
@@ -237,6 +255,79 @@ def _write_json(
             ensure_ascii=False,
             indent=2,
         )
+
+
+def _resolve_optional_path(value: Any) -> Optional[Path]:
+    """Resolve a path-like value when it points to a real local file."""
+
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path = path.resolve()
+    if path.is_file():
+        return path
+    return None
+
+
+def measure_image_geometry(image_path: Path) -> Dict[str, Any]:
+    """Measure canvas and ink bbox geometry for one glyph/crop image.
+
+    The returned values are numeric and are kept separate from symbolic
+    ScriLog/ScribeTrace topology so they do not explode joint signatures.
+    """
+
+    image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    if image is None:
+        return {}
+
+    image_height, image_width = image.shape[:2]
+    border = np.concatenate([image[0, :], image[-1, :], image[:, 0], image[:, -1]])
+    if float(np.median(border)) > 128.0:
+        ink_source = 255 - image
+    else:
+        ink_source = image
+    _, mask = cv2.threshold(ink_source, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    coords = cv2.findNonZero(mask)
+    if coords is None:
+        return {
+            "image_width": int(image_width),
+            "image_height": int(image_height),
+            "ink_bbox_x": 0,
+            "ink_bbox_y": 0,
+            "ink_bbox_width": 0,
+            "ink_bbox_height": 0,
+            "ink_bbox_area": 0,
+            "ink_pixel_count": 0,
+            "ink_density": 0.0,
+            "ink_aspect_ratio": 0.0,
+            "ink_center_x_ratio": 0.0,
+            "ink_center_y_ratio": 0.0,
+        }
+
+    x, y, width, height = cv2.boundingRect(coords)
+    ink_pixels = int(cv2.countNonZero(mask))
+    bbox_area = int(width * height)
+    center_x = x + width / 2.0
+    center_y = y + height / 2.0
+    return {
+        "image_width": int(image_width),
+        "image_height": int(image_height),
+        "ink_bbox_x": int(x),
+        "ink_bbox_y": int(y),
+        "ink_bbox_width": int(width),
+        "ink_bbox_height": int(height),
+        "ink_bbox_area": bbox_area,
+        "ink_pixel_count": ink_pixels,
+        "ink_density": round(ink_pixels / max(1, bbox_area), 6),
+        "ink_aspect_ratio": round(width / max(1, height), 6),
+        "ink_center_x_ratio": round(center_x / max(1, image_width), 6),
+        "ink_center_y_ratio": round(center_y / max(1, image_height), 6),
+    }
 
 
 def _iter_json_files(input_path: Path) -> Iterable[Path]:
@@ -601,6 +692,58 @@ def extract_expected_payload(record: Dict[str, Any]) -> Dict[str, Any]:
             "expected_signature",
         ],
     )
+
+
+def extract_geometry_payload(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract or measure physical image/crop geometry for one record."""
+
+    geometry = _first_present_dict(
+        record,
+        [
+            "geometry",
+            "image_geometry",
+            "physical_geometry",
+            "crop_geometry",
+            "bbox_geometry",
+        ],
+    )
+    if geometry:
+        return {
+            key: geometry[key]
+            for key in GEOMETRY_FEATURES
+            if key in geometry
+        }
+
+    metadata = _safe_dict(record.get("metadata"))
+    metadata_geometry = _first_present_dict(
+        metadata,
+        [
+            "geometry",
+            "image_geometry",
+            "physical_geometry",
+            "crop_geometry",
+            "bbox_geometry",
+        ],
+    )
+    if metadata_geometry:
+        return {
+            key: metadata_geometry[key]
+            for key in GEOMETRY_FEATURES
+            if key in metadata_geometry
+        }
+
+    for key in [
+        "image_path",
+        "crop_path",
+        "source_crop_path",
+        "visual_crop_path",
+        "mask_crop_path",
+    ]:
+        image_path = _resolve_optional_path(record.get(key) or metadata.get(key))
+        if image_path is not None:
+            return measure_image_geometry(image_path)
+
+    return {}
 
 
 # ============================================================
@@ -981,6 +1124,59 @@ class FeatureDistribution:
 
 
 @dataclass
+class NumericDistribution:
+    """Stores numeric measurements and exports descriptive statistics."""
+
+    feature_name: str
+    values: List[float] = field(default_factory=list)
+
+    def add(self, value: Any) -> None:
+        """Add one numeric value if it can be converted safely."""
+
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return
+        if not np.isfinite(numeric):
+            return
+        self.values.append(numeric)
+
+    def total(self) -> int:
+        """Return the number of recorded numeric values."""
+
+        return len(self.values)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Export mean/median/min/max/percentiles for this feature."""
+
+        if not self.values:
+            return {
+                "feature": self.feature_name,
+                "total": 0,
+                "mean": None,
+                "median": None,
+                "min": None,
+                "max": None,
+                "p10": None,
+                "p90": None,
+                "stdev": None,
+            }
+
+        values = np.array(self.values, dtype=np.float64)
+        return {
+            "feature": self.feature_name,
+            "total": int(values.size),
+            "mean": round(float(np.mean(values)), 6),
+            "median": round(float(np.median(values)), 6),
+            "min": round(float(np.min(values)), 6),
+            "max": round(float(np.max(values)), 6),
+            "p10": round(float(np.percentile(values, 10)), 6),
+            "p90": round(float(np.percentile(values, 90)), 6),
+            "stdev": round(float(np.std(values)), 6),
+        }
+
+
+@dataclass
 class ErrorDistribution:
     """
     Stores expected-vs-observed mismatches for one feature.
@@ -1120,6 +1316,7 @@ class ClassStats:
     raw_class_id: str = "unknown"
     sample_count: int = 0
     feature_distributions: Dict[str, FeatureDistribution] = field(default_factory=dict)
+    geometry_distributions: Dict[str, NumericDistribution] = field(default_factory=dict)
     error_distributions: Dict[str, ErrorDistribution] = field(default_factory=dict)
     joint_signatures: Counter = field(default_factory=Counter)
     joint_signature_sources: Dict[str, str] = field(default_factory=dict)
@@ -1158,6 +1355,23 @@ class ClassStats:
                 )
 
             self.feature_distributions[feature_name].add(value)
+
+    def add_geometry(
+        self,
+        geometry_features: Dict[str, Any],
+    ) -> None:
+        """Add numeric image/crop geometry measurements into this profile."""
+
+        for feature_name in GEOMETRY_FEATURES:
+            if feature_name not in geometry_features:
+                continue
+            if feature_name not in self.geometry_distributions:
+                self.geometry_distributions[feature_name] = NumericDistribution(
+                    feature_name=feature_name,
+                )
+            self.geometry_distributions[feature_name].add(
+                geometry_features[feature_name]
+            )
 
     def modal_feature_standard(self) -> Dict[str, Dict[str, Any]]:
         """Return each feature's most frequent value and empirical support."""
@@ -1430,6 +1644,13 @@ class ClassStats:
                 )
             },
 
+            "geometry_profile": {
+                feature_name: distribution.to_dict()
+                for feature_name, distribution in sorted(
+                    self.geometry_distributions.items()
+                )
+            },
+
             "common_errors": self.error_rows(
                 min_percent=common_error_threshold,
             ),
@@ -1522,11 +1743,12 @@ class ScriStisticsMiner:
 
         observed_payload = extract_observed_payload(record)
         expected_payload = extract_expected_payload(record)
+        geometry_features = extract_geometry_payload(record)
 
         observed_features = flatten_features(observed_payload)
         expected_features = flatten_features(expected_payload)
 
-        if not observed_features:
+        if not observed_features and not geometry_features:
             self.skipped_records += 1
             return
 
@@ -1555,6 +1777,9 @@ class ScriStisticsMiner:
                 or ""
             ),
         )
+
+        if geometry_features:
+            class_stats.add_geometry(geometry_features)
 
         if expected_features:
             class_stats.add_expected_vs_observed(
@@ -2011,6 +2236,7 @@ def run_matenadata_miner(
                 "class_label": class_id,
                 "source_id": source_id,
                 "observed": observation,
+                "geometry": measure_image_geometry(image_path),
             }
         )
         successful += 1

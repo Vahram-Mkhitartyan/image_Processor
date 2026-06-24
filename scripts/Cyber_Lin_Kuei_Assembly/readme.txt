@@ -20,6 +20,15 @@ glyph_classifier.py:
 evaluate_glyph_classifier.py:
     Evaluates saved glyph classifier behavior.
 
+word_level_ocr_trainer.py:
+    Trains the N05 word-level OCR expert. It synthesizes Armenian word images
+    from Matenadata glyphs plus the Armenian word-frequency corpus, then trains
+    a compact CRNN/CTC recognizer.
+
+word_level_ocr_settings.json:
+    Owns the synthetic word dataset size, rendering controls, CRNN training
+    hyperparameters, and output locations.
+
 scribetrace_random_forest.py:
     Exports deterministic ScribeTrace geometry vectors from Matenadata and
     trains a Random Forest glyph-classification baseline.
@@ -119,6 +128,33 @@ Inference should compare exact ordered feature_names against the model schema
 before calling predict_proba().
 
 The folder name is ridiculous in the correct way. Keep it.
+
+Word-Level OCR v0.1
+-------------------
+The word-level OCR arena starts from synthetic words because we do not yet have
+a large labeled real-word crop dataset. It renders real Matenadata glyphs into
+word images, trains CTC sequence recognition, and writes artifacts to:
+
+    models/word_level_ocr_v0_1/
+    reports/word_level_ocr_v0_1/
+
+Render a few synthetic debug words:
+
+    .venv/bin/python \
+        scripts/Cyber_Lin_Kuei_Assembly/word_level_ocr_trainer.py \
+        --mode smoke --smoke-count 12
+
+Quick overfit/debug training:
+
+    .venv/bin/python -u \
+        scripts/Cyber_Lin_Kuei_Assembly/word_level_ocr_trainer.py \
+        --mode train --limit-batches 5
+
+Configured training:
+
+    .venv/bin/python -u \
+        scripts/Cyber_Lin_Kuei_Assembly/word_level_ocr_trainer.py \
+        --mode train
 
 Aristotel
 ---------
