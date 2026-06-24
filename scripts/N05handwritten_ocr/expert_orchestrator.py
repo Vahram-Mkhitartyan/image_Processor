@@ -741,6 +741,7 @@ def build_handwriting_expert_map(
         document_id=document_id,
         handwritten_text_units=handwritten_text_units,
         settings=settings.get("assembly", {}),
+        output_dir=folders["assembly"],
     )
     assembly_path = os.path.join(
         folders["assembly"],

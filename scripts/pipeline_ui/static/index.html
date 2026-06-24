@@ -275,6 +275,19 @@
                   draggable="false"
                 >
               </div>
+              <aside id="crop-context-panel" class="crop-context-panel" aria-live="polite">
+                <div class="crop-context-heading">
+                  <span>ORIGINAL CONTEXT</span>
+                  <strong id="crop-context-title">N02 crop bbox</strong>
+                </div>
+                <div id="crop-context-frame" class="crop-context-frame">
+                  <img id="crop-context-image" alt="Original document with crop bbox">
+                  <span id="crop-context-box" class="crop-context-box"></span>
+                </div>
+                <div id="crop-context-meta" class="crop-context-meta">
+                  Select an N02 crop to see its document location.
+                </div>
+              </aside>
               <div class="zoom-controls" aria-label="Image zoom controls">
                 <button id="zoom-out" type="button" title="Zoom out">−</button>
                 <button id="zoom-reset" type="button" title="Reset zoom">100%</button>

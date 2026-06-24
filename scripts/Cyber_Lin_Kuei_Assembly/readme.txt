@@ -15,7 +15,9 @@ evaluate_minos_v2.py:
     Evaluates saved Minos models and threshold behavior.
 
 glyph_classifier.py:
-    Glyph-model training/experiment code for the future N05 expert family.
+    Glyph-model training/experiment code for the N05 character_detector CNN.
+    It can train clean Matenadata glyphs alone or add lightweight Aristotel
+    damage variants in memory.
 
 evaluate_glyph_classifier.py:
     Evaluates saved glyph classifier behavior.
@@ -155,6 +157,51 @@ Configured training:
     .venv/bin/python -u \
         scripts/Cyber_Lin_Kuei_Assembly/word_level_ocr_trainer.py \
         --mode train
+
+Character CNN + Aristotel
+-------------------------
+The character-detector CNN can now use Aristotel as a robustness teacher. The
+trainer keeps validation and test clean, but exposes extra damaged training
+views virtually through the Dataset. It does not write multiplied damaged PNGs
+to disk.
+
+Smoke test:
+
+    .venv/bin/python \
+        scripts/Cyber_Lin_Kuei_Assembly/glyph_classifier.py \
+        --model-name glyph_classifier_aristotel_smoke \
+        --limit-per-class 10 \
+        --epochs 1 \
+        --batch-size 128 \
+        --num-workers 0 \
+        --use-aristotel \
+        --aristotel-variants-per-sample 1 \
+        --aristotel-recipes light_cut light_erosion threshold_failure light_blur
+
+Full Matenadata training:
+
+    .venv/bin/python -u \
+        scripts/Cyber_Lin_Kuei_Assembly/glyph_classifier.py \
+        --model-name glyph_classifier_v0_2_aristotel \
+        --limit-per-class -1 \
+        --epochs 20 \
+        --batch-size 128 \
+        --num-workers 2 \
+        --use-aristotel \
+        --aristotel-variants-per-sample 4 \
+        --aristotel-recipes light_cut light_erosion threshold_failure light_blur
+
+Outputs:
+
+    models/glyph_classifier_v0_2_aristotel/
+    reports/glyph_classifier_v0_2_aristotel/
+
+New checkpoints declare:
+
+    input_polarity_mode = normalize_black_ink_on_white
+
+That lets runtime normalize N05 white-on-black masks before applying the CNN's
+usual one-minus-grayscale tensor transform.
 
 Aristotel
 ---------

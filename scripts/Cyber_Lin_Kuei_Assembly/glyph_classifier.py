@@ -1,4 +1,5 @@
 from pathlib import Path
+import argparse
 import json
 import random
 import shutil
@@ -18,6 +19,11 @@ from sklearn.metrics import (
     accuracy_score,
     top_k_accuracy_score,
 )
+
+try:
+    from Aristotel.recipes import build_default_recipes
+except Exception:
+    build_default_recipes = None
 
 
 # ============================================================
@@ -165,6 +171,74 @@ def resize_with_padding(image: Image.Image, size: int = 64) -> Image.Image:
     return canvas
 
 
+def threshold_to_binary(image: Image.Image, threshold: int = 128) -> Image.Image:
+    """
+    Convert a grayscale glyph to strict black/white pixels.
+
+    Aristotel and the CNN both behave more consistently when the training
+    samples use the same binary contract as the N05 masks.
+    """
+    arr = np.array(image.convert("L"), dtype=np.uint8)
+    binary = np.where(arr < threshold, 0, 255).astype(np.uint8)
+    return Image.fromarray(binary, mode="L")
+
+
+def build_aristotel_recipe_pool(recipe_names: list[str] | None = None):
+    """
+    Load the shared Aristotel damage recipes used by the geometry experts.
+
+    Args:
+        recipe_names: Optional list of recipe names to keep. None or ["all"]
+            keeps every default recipe.
+
+    Returns:
+        A deterministic list of DamageRecipe objects.
+    """
+    if build_default_recipes is None:
+        raise RuntimeError(
+            "Aristotel recipes could not be imported. Run from the project root "
+            "with the project virtual environment active."
+        )
+
+    recipes = build_default_recipes()
+    recipes = sorted(recipes, key=lambda recipe: recipe.name)
+
+    if not recipe_names or recipe_names == ["all"]:
+        return recipes
+
+    wanted = set(recipe_names)
+    selected = [recipe for recipe in recipes if recipe.name in wanted]
+    missing = sorted(wanted - {recipe.name for recipe in selected})
+
+    if missing:
+        raise ValueError(f"Unknown Aristotel recipe names: {', '.join(missing)}")
+
+    return selected
+
+
+def apply_aristotel_recipe(
+    image: Image.Image,
+    recipe,
+    seed: int,
+) -> Image.Image:
+    """
+    Apply one Aristotel damage recipe to a binary glyph image.
+
+    Args:
+        image: PIL grayscale glyph, black ink on white background.
+        recipe: DamageRecipe object.
+        seed: Deterministic per-sample seed.
+
+    Returns:
+        A PIL grayscale image with the same polarity.
+    """
+    rng = np.random.default_rng(seed)
+    arr = np.array(image.convert("L"), dtype=np.uint8)
+    damaged, _ = recipe.apply(arr, rng)
+    damaged = np.asarray(damaged, dtype=np.uint8)
+    return Image.fromarray(damaged, mode="L")
+
+
 def make_split_report(samples, train_samples, val_samples, test_samples):
     return {
         "total": len(samples),
@@ -182,19 +256,48 @@ def make_split_report(samples, train_samples, val_samples, test_samples):
 # ============================================================
 
 class GlyphDataset(Dataset):
-    def __init__(self, samples, image_size: int = 64):
+    def __init__(
+        self,
+        samples,
+        image_size: int = 64,
+        aristotel_recipes=None,
+        aristotel_variants_per_sample: int = 0,
+        seed: int = 42,
+        binary_threshold: int = 128,
+    ):
         self.samples = samples
         self.image_size = image_size
+        self.aristotel_recipes = aristotel_recipes or []
+        self.aristotel_variants_per_sample = max(0, int(aristotel_variants_per_sample))
+        self.seed = int(seed)
+        self.binary_threshold = int(binary_threshold)
+        self.views_per_sample = 1 + self.aristotel_variants_per_sample
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.samples) * self.views_per_sample
 
     def __getitem__(self, index):
-        path, label = self.samples[index]
+        sample_index = index // self.views_per_sample
+        view_index = index % self.views_per_sample
+        path, label = self.samples[sample_index]
 
         try:
             image = Image.open(path)
             image = resize_with_padding(image, self.image_size)
+            image = threshold_to_binary(image, self.binary_threshold)
+
+            # view_index 0 is always clean. Later views are deterministic
+            # Aristotel variants of the same labeled glyph.
+            if view_index > 0 and self.aristotel_recipes:
+                recipe_index = (view_index - 1) % len(self.aristotel_recipes)
+                recipe = self.aristotel_recipes[recipe_index]
+                damage_seed = (
+                    self.seed
+                    + sample_index * 1009
+                    + view_index * 9176
+                    + recipe_index * 131
+                )
+                image = apply_aristotel_recipe(image, recipe, damage_seed)
 
             arr = np.array(image).astype(np.float32) / 255.0
 
@@ -442,11 +545,65 @@ def save_topk_examples(y_true, y_logits, label_map, k: int = 5, max_examples: in
     )
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Train the N05 character-detector CNN on Matenadata glyphs."
+    )
+    parser.add_argument("--dataset-dir", type=Path, default=DATASET_DIR)
+    parser.add_argument("--model-name", default=MODEL_NAME)
+    parser.add_argument("--image-size", type=int, default=IMAGE_SIZE)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--learning-rate", type=float, default=LEARNING_RATE)
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED)
+    parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument("--binary-threshold", type=int, default=128)
+    parser.add_argument(
+        "--limit-per-class",
+        type=int,
+        default=-1,
+        help="Debug limiter. Use -1 for the full Matenadata class folders.",
+    )
+    parser.add_argument(
+        "--use-aristotel",
+        action="store_true",
+        help="Enable simple Aristotel damage variants for training samples only.",
+    )
+    parser.add_argument(
+        "--aristotel-variants-per-sample",
+        type=int,
+        default=2,
+        help="How many damaged virtual views to add per clean training glyph.",
+    )
+    parser.add_argument(
+        "--aristotel-recipes",
+        nargs="+",
+        default=["light_cut", "light_erosion", "threshold_failure", "light_blur"],
+        help="Recipe names to use, or 'all'. Keep this light for the CNN.",
+    )
+    return parser.parse_args()
+
+
 # ============================================================
 # Main
 # ============================================================
 
 def main():
+    global DATASET_DIR, MODEL_NAME, OUTPUT_DIR, REPORT_DIR
+    global IMAGE_SIZE, BATCH_SIZE, EPOCHS, LEARNING_RATE, RANDOM_SEED
+
+    args = parse_args()
+
+    DATASET_DIR = args.dataset_dir
+    MODEL_NAME = args.model_name
+    OUTPUT_DIR = PROJECT_ROOT / "models" / MODEL_NAME
+    REPORT_DIR = PROJECT_ROOT / "reports" / MODEL_NAME
+    IMAGE_SIZE = args.image_size
+    BATCH_SIZE = args.batch_size
+    EPOCHS = args.epochs
+    LEARNING_RATE = args.learning_rate
+    RANDOM_SEED = args.seed
+
     seed_everything(RANDOM_SEED)
     ensure_dirs()
 
@@ -468,6 +625,18 @@ def main():
         )
 
     samples, class_counts = collect_samples(DATASET_DIR)
+
+    if args.limit_per_class is not None and args.limit_per_class > 0:
+        limited_samples = []
+        limited_counts = Counter()
+        for class_id in range(NUM_CLASSES):
+            class_samples = [
+                sample for sample in samples if int(sample[1]) == class_id
+            ][: args.limit_per_class]
+            limited_samples.extend(class_samples)
+            limited_counts[str(class_id)] = len(class_samples)
+        samples = limited_samples
+        class_counts = limited_counts
 
     print(f"Collected samples: {len(samples)}")
     print(f"Classes found: {len(class_counts)}")
@@ -522,29 +691,57 @@ def main():
     print(f"  Validation: {len(val_samples)}")
     print(f"  Test:       {len(test_samples)}")
 
-    train_dataset = GlyphDataset(train_samples, IMAGE_SIZE)
-    val_dataset = GlyphDataset(val_samples, IMAGE_SIZE)
-    test_dataset = GlyphDataset(test_samples, IMAGE_SIZE)
+    aristotel_recipes = []
+    aristotel_training_enabled = bool(args.use_aristotel)
+
+    if aristotel_training_enabled:
+        aristotel_recipes = build_aristotel_recipe_pool(args.aristotel_recipes)
+        print("Aristotel CNN augmentation:")
+        print(f"  Variants/sample: {args.aristotel_variants_per_sample}")
+        print("  Recipes:")
+        for recipe in aristotel_recipes:
+            print(f"    - {recipe.name}")
+
+    train_dataset = GlyphDataset(
+        train_samples,
+        IMAGE_SIZE,
+        aristotel_recipes=aristotel_recipes,
+        aristotel_variants_per_sample=(
+            args.aristotel_variants_per_sample if aristotel_training_enabled else 0
+        ),
+        seed=RANDOM_SEED,
+        binary_threshold=args.binary_threshold,
+    )
+    val_dataset = GlyphDataset(
+        val_samples,
+        IMAGE_SIZE,
+        binary_threshold=args.binary_threshold,
+    )
+    test_dataset = GlyphDataset(
+        test_samples,
+        IMAGE_SIZE,
+        binary_threshold=args.binary_threshold,
+    )
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        num_workers=2,
+        num_workers=args.num_workers,
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=BATCH_SIZE,
         shuffle=False,
-        num_workers=2,
+        num_workers=args.num_workers,
     )
 
     test_loader = DataLoader(
         test_dataset,
         batch_size=BATCH_SIZE,
         shuffle=False,
-        num_workers=2,
+        num_workers=args.num_workers,
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -613,6 +810,8 @@ def main():
             "model_state_dict": model.state_dict(),
             "num_classes": NUM_CLASSES,
             "image_size": IMAGE_SIZE,
+            "input_polarity_mode": "normalize_black_ink_on_white",
+            "binary_threshold": args.binary_threshold,
             "label_map": label_map,
             "epoch": epoch,
             "val_top1": float(val_top1),
@@ -672,9 +871,23 @@ def main():
         "epochs": EPOCHS,
         "learning_rate": LEARNING_RATE,
         "random_seed": RANDOM_SEED,
+        "binary_threshold": args.binary_threshold,
         "dataset_dir": str(DATASET_DIR),
         "label_map_path": str(LABEL_MAP_PATH),
         "dataset_total_images": len(samples),
+        "train_virtual_images": len(train_dataset),
+        "aristotel_training": {
+            "enabled": aristotel_training_enabled,
+            "variants_per_sample": (
+                args.aristotel_variants_per_sample
+                if aristotel_training_enabled
+                else 0
+            ),
+            "recipes": [recipe.name for recipe in aristotel_recipes],
+            "recipe_definitions": [
+                recipe.definition() for recipe in aristotel_recipes
+            ],
+        },
         "split": split_report,
         "best_epoch": best_epoch,
         "best_val_top1": float(best_val_top1),
@@ -686,7 +899,7 @@ def main():
         "notes": [
             "v0.1 baseline model.",
             "Images are resized with aspect ratio preserved and padded to 64x64.",
-            "No heavy augmentation is used yet.",
+            "Optional Aristotel augmentation is applied only to training samples.",
             "Top-k output is important because N05 needs candidate letters, not only one winner.",
         ],
     }

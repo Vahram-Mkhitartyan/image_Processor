@@ -28,7 +28,20 @@
   },
   "assembly": {
     "segmentation": {
-      "max_segmentation_paths": 8
+      "max_segmentation_paths": 8,
+      "enable_word_ocr_boundary_paths": true,
+      "word_ocr_boundary_probability_threshold": 0.55,
+      "word_ocr_boundary_match_tolerance_px": 5,
+      "word_ocr_boundary_min_gap_px": 6,
+      "word_ocr_boundary_edge_margin_px": 4,
+      "word_ocr_min_segment_width_px": 4,
+      "word_ocr_max_boundaries": 12,
+      "word_ocr_alignment_score_boost": 0.15,
+      "word_ocr_length_agreement_boost": 0.08,
+      "whole_unit_word_ocr_multi_letter_penalty": 0.35
+    },
+    "segment_artifacts": {
+      "enabled": true
     },
     "letter_matrix": {
       "top_k_per_position": 5

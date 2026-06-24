@@ -3,6 +3,8 @@ const state = {
   selectedDocument: null,
   selectedStage: "all",
   selectedArtifactPath: null,
+  artifactContextRequestId: 0,
+  cropContext: null,
   logOffset: 0,
   lastProcessSignature: "",
   artifactSearchTimer: null,
@@ -43,6 +45,12 @@ const elements = {
   clearConsole: document.querySelector("#clear-console"),
   consoleOutput: document.querySelector("#console-output"),
   contactSheet: document.querySelector("#contact-sheet"),
+  cropContextBox: document.querySelector("#crop-context-box"),
+  cropContextFrame: document.querySelector("#crop-context-frame"),
+  cropContextImage: document.querySelector("#crop-context-image"),
+  cropContextMeta: document.querySelector("#crop-context-meta"),
+  cropContextPanel: document.querySelector("#crop-context-panel"),
+  cropContextTitle: document.querySelector("#crop-context-title"),
   documentCount: document.querySelector("#document-count"),
   documentList: document.querySelector("#document-list"),
   heartbeat: document.querySelector("#heartbeat"),
@@ -646,6 +654,92 @@ function setPreviewZoom(nextZoom) {
   applyPreviewTransform();
 }
 
+function hideCropContext(reason = "") {
+  state.cropContext = null;
+  elements.cropContextPanel.classList.remove("visible");
+  elements.previewViewport.classList.remove("with-context");
+  elements.cropContextImage.removeAttribute("src");
+  elements.cropContextBox.style.display = "none";
+  elements.cropContextMeta.textContent = reason || "No crop context available.";
+}
+
+function renderCropContextBox() {
+  const context = state.cropContext;
+  const image = elements.cropContextImage;
+  if (!context?.available || !image.naturalWidth || !image.naturalHeight) {
+    elements.cropContextBox.style.display = "none";
+    return;
+  }
+
+  const bbox = context.bbox;
+  const imageRect = image.getBoundingClientRect();
+  const frameRect = elements.cropContextFrame.getBoundingClientRect();
+  const scaleX = imageRect.width / image.naturalWidth;
+  const scaleY = imageRect.height / image.naturalHeight;
+  elements.cropContextBox.style.display = "block";
+  elements.cropContextBox.style.left = `${imageRect.left - frameRect.left + bbox.x1 * scaleX}px`;
+  elements.cropContextBox.style.top = `${imageRect.top - frameRect.top + bbox.y1 * scaleY}px`;
+  elements.cropContextBox.style.width = `${Math.max(2, (bbox.x2 - bbox.x1) * scaleX)}px`;
+  elements.cropContextBox.style.height = `${Math.max(2, (bbox.y2 - bbox.y1) * scaleY)}px`;
+}
+
+function renderCropContext(context) {
+  if (!context?.available) {
+    hideCropContext(context?.reason ? `Context: ${context.reason}` : "");
+    return;
+  }
+
+  state.cropContext = context;
+  const record = context.record || {};
+  const bbox = context.bbox || {};
+  elements.cropContextPanel.classList.add("visible");
+  elements.previewViewport.classList.add("with-context");
+  elements.cropContextTitle.textContent = (
+    `${record.layer || "crop"} · ${record.source_group_id || "source group"}`
+  );
+  elements.cropContextMeta.innerHTML = `
+    <span>TU ${escapeHtml(record.text_unit_id ?? "—")}</span>
+    <span>${escapeHtml(record.recommended_next_node || "route unknown")}</span>
+    <code>x${bbox.x1}, y${bbox.y1}, w${bbox.x2 - bbox.x1}, h${bbox.y2 - bbox.y1}</code>
+    ${
+      record.parent_stacked_source_group_id
+        ? `<span class="context-warning">split from ${escapeHtml(record.parent_stacked_source_group_id)}</span>`
+        : ""
+    }
+  `;
+  elements.cropContextBox.style.display = "none";
+  elements.cropContextImage.src = context.source_document_url;
+}
+
+async function loadArtifactContext(artifact) {
+  const requestId = ++state.artifactContextRequestId;
+  const isN02CropArtifact = (
+    artifact
+    && artifact.stage === "n02"
+    && artifact.relative_path.includes("/n02_crop_refiner/crops/")
+  );
+  if (!isN02CropArtifact) {
+    hideCropContext("");
+    return;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      document: state.selectedDocument,
+      path: artifact.relative_path,
+    });
+    const context = await requestJson(`/api/artifact-context?${params}`);
+    if (requestId !== state.artifactContextRequestId) {
+      return;
+    }
+    renderCropContext(context);
+  } catch (error) {
+    if (requestId === state.artifactContextRequestId) {
+      hideCropContext(`Context failed: ${error.message}`);
+    }
+  }
+}
+
 function selectArtifact(artifact, card) {
   state.selectedArtifactPath = artifact.relative_path;
   document.querySelectorAll(".artifact-card").forEach(
@@ -661,6 +755,7 @@ function selectArtifact(artifact, card) {
   elements.previewName.textContent = artifact.name;
   elements.previewPath.textContent = artifact.relative_path;
   elements.previewPath.title = artifact.relative_path;
+  loadArtifactContext(artifact);
 }
 
 function renderArtifacts(payload) {
@@ -1913,6 +2008,8 @@ document.addEventListener("wheel", (event) => {
 }, { passive: false });
 
 elements.previewViewport.addEventListener("dblclick", resetPreviewZoom);
+elements.cropContextImage.addEventListener("load", renderCropContextBox);
+window.addEventListener("resize", renderCropContextBox);
 
 elements.previewViewport.addEventListener("pointerdown", (event) => {
   if (state.previewZoom <= 1) return;

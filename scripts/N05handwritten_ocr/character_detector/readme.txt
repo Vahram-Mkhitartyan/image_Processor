@@ -16,6 +16,24 @@ The active baseline is:
 It is a four-block PyTorch CNN trained on 78 Matenadata classes at 64x64. Model
 weights are cached after the first prediction.
 
+Aristotel Training
+------------------
+The CNN trainer can now add lightweight Aristotel damage variants during
+training without saving generated images to disk. This is meant to teach the
+pixel expert damaged/cut/thinned glyphs while keeping validation and test clean.
+
+Example:
+
+    python scripts/Cyber_Lin_Kuei_Assembly/glyph_classifier.py \
+      --model-name glyph_classifier_v0_2_aristotel \
+      --use-aristotel \
+      --aristotel-variants-per-sample 2 \
+      --aristotel-recipes light_cut light_erosion threshold_failure light_blur
+
+New checkpoints declare `input_polarity_mode=normalize_black_ink_on_white`, so
+white-on-black N05 masks are inverted before the usual `1 - grayscale` tensor
+conversion.
+
 Input Contract
 --------------
 The preferred input is an exact single-character analysis mask. This model was

@@ -26,6 +26,19 @@ static/styles.css:
 static/app.js:
     Phase execution, live log polling, document selection, and image tracing.
 
+Current Debug Features
+----------------------
+The artifact gallery can inspect node outputs without leaving the browser.
+
+For N02 crop artifacts, the UI also asks the server for crop context. When the
+metadata can be matched, the detail view shows the original document with the
+crop bbox overlay beside the selected crop. This is especially useful when a
+refined crop contains stacked words, red corrections, or suspicious partial
+letters.
+
+The same artifact server path is used by manual N05 expert probes, so copied
+artifact URLs can be resolved back into project-relative files.
+
 Environment
 -----------
 OCR_PIPELINE_UI_PORT:

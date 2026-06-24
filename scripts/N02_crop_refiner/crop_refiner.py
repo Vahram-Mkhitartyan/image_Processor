@@ -25,6 +25,20 @@ class RefinerSettings:
     correction_replacement_min_area: int = 80
     correction_replacement_max_aspect_ratio: float = 12.0
     correction_max_replacements_per_blue: int = 2
+    stacked_text_split_enabled: bool = True
+    stacked_text_split_layers: tuple = ("blue", "green", "black", "unknown_color")
+    stacked_text_min_height_px: int = 68
+    stacked_text_min_width_px: int = 70
+    stacked_text_min_aspect_ratio: float = 1.35
+    stacked_text_row_ink_ratio: float = 0.012
+    stacked_text_min_gap_px: int = 4
+    stacked_text_merge_gap_px: int = 3
+    stacked_text_projection_valley_enabled: bool = True
+    stacked_text_projection_valley_max_ratio: float = 0.45
+    stacked_text_projection_min_side_ink_ratio: float = 0.22
+    stacked_text_min_segment_height_px: int = 12
+    stacked_text_segment_padding_px: int = 2
+    stacked_text_max_segments: int = 4
 
     def to_dict(self):
         return asdict(self)
@@ -937,6 +951,327 @@ def collect_layer_groups(scribemap_result, layers_to_refine):
     return collected
 
 
+def find_horizontal_text_bands(mask_crop, settings):
+    """Find separated horizontal ink bands inside a suspected stacked crop.
+
+    Args:
+        mask_crop: Binary layer mask cropped to a source group bbox.
+        settings: RefinerSettings instance.
+
+    Returns:
+        List of local band dictionaries with y1/y2 and ink counts.
+    """
+    if mask_crop is None or mask_crop.size == 0:
+        return []
+
+    binary = (mask_crop > 0).astype(np.uint8)
+    height, width = binary.shape[:2]
+    if height <= 0 or width <= 0:
+        return []
+
+    projection = binary.sum(axis=1)
+    if height >= 3:
+        projection = np.convolve(projection, np.ones(3) / 3.0, mode="same")
+
+    row_threshold = max(
+        1.0,
+        float(width) * float(settings.stacked_text_row_ink_ratio),
+    )
+    active_rows = projection >= row_threshold
+
+    raw_bands = []
+    start = None
+    for row_index, is_active in enumerate(active_rows):
+        if is_active and start is None:
+            start = row_index
+        elif not is_active and start is not None:
+            raw_bands.append((start, row_index))
+            start = None
+    if start is not None:
+        raw_bands.append((start, height))
+
+    if not raw_bands:
+        return []
+
+    merged_bands = []
+    for band in raw_bands:
+        if not merged_bands:
+            merged_bands.append(list(band))
+            continue
+        gap = band[0] - merged_bands[-1][1]
+        if gap <= int(settings.stacked_text_merge_gap_px):
+            merged_bands[-1][1] = band[1]
+        else:
+            merged_bands.append(list(band))
+
+    bands = []
+    for y1, y2 in merged_bands:
+        band_height = y2 - y1
+        ink_pixels = int(binary[y1:y2, :].sum())
+        if band_height < int(settings.stacked_text_min_segment_height_px):
+            continue
+        if ink_pixels <= 0:
+            continue
+        bands.append({
+            "y1": int(y1),
+            "y2": int(y2),
+            "height": int(band_height),
+            "ink_pixels": ink_pixels,
+        })
+
+    return bands
+
+
+def find_projection_valley_split_bands(mask_crop, settings):
+    """Find a two-line split when rows are connected but have a clear trough.
+
+    Args:
+        mask_crop: Binary layer mask cropped to a source group bbox.
+        settings: RefinerSettings instance.
+
+    Returns:
+        Two band dictionaries, or an empty list when no safe trough exists.
+    """
+    if not bool(settings.stacked_text_projection_valley_enabled):
+        return []
+    if mask_crop is None or mask_crop.size == 0:
+        return []
+
+    binary = (mask_crop > 0).astype(np.uint8)
+    height, width = binary.shape[:2]
+    min_segment_height = int(settings.stacked_text_min_segment_height_px)
+    if height < min_segment_height * 2 or width <= 0:
+        return []
+
+    projection = binary.sum(axis=1).astype(float)
+    smooth_window = 5 if height >= 20 else 3
+    projection = np.convolve(
+        projection,
+        np.ones(smooth_window) / float(smooth_window),
+        mode="same",
+    )
+    max_projection = float(projection.max()) if projection.size else 0.0
+    if max_projection <= 0:
+        return []
+
+    start = min_segment_height
+    end = height - min_segment_height
+    if end <= start:
+        return []
+
+    total_ink = max(int(binary.sum()), 1)
+    min_side_ratio = float(settings.stacked_text_projection_min_side_ink_ratio)
+    max_valley_ratio = float(settings.stacked_text_projection_valley_max_ratio)
+    valid_valleys = []
+    for row_index in range(start, end):
+        valley_ratio = float(projection[row_index]) / max_projection
+        if valley_ratio > max_valley_ratio:
+            continue
+        top_ink = int(binary[:row_index, :].sum())
+        bottom_ink = int(binary[row_index:, :].sum())
+        top_ratio = top_ink / total_ink
+        bottom_ratio = bottom_ink / total_ink
+        if top_ratio < min_side_ratio or bottom_ratio < min_side_ratio:
+            continue
+        valid_valleys.append(
+            (
+                valley_ratio,
+                abs(top_ratio - bottom_ratio),
+                abs(row_index - height / 2.0),
+                row_index,
+                top_ink,
+                bottom_ink,
+            )
+        )
+
+    if not valid_valleys:
+        return []
+
+    (
+        valley_ratio,
+        _side_balance,
+        _center_distance,
+        valley_index,
+        top_ink,
+        bottom_ink,
+    ) = min(valid_valleys)
+
+    return [
+        {
+            "y1": 0,
+            "y2": int(valley_index),
+            "height": int(valley_index),
+            "ink_pixels": top_ink,
+            "split_method": "projection_valley",
+            "valley_y": int(valley_index),
+            "valley_ratio": round(valley_ratio, 4),
+        },
+        {
+            "y1": int(valley_index),
+            "y2": int(height),
+            "height": int(height - valley_index),
+            "ink_pixels": bottom_ink,
+            "split_method": "projection_valley",
+            "valley_y": int(valley_index),
+            "valley_ratio": round(valley_ratio, 4),
+        },
+    ]
+
+
+def should_attempt_stacked_text_split(source_group, settings):
+    """Return whether one source group is suspicious enough to inspect."""
+    if not bool(settings.stacked_text_split_enabled):
+        return False
+    if source_group.get("layer") not in set(settings.stacked_text_split_layers):
+        return False
+    if not source_group.get("is_final_text_candidate", True):
+        return False
+
+    width = int(source_group.get("width") or bbox_width(source_group["bbox"]))
+    height = int(source_group.get("height") or bbox_height(source_group["bbox"]))
+    aspect_ratio = width / max(height, 1)
+
+    return (
+        height >= int(settings.stacked_text_min_height_px)
+        and width >= int(settings.stacked_text_min_width_px)
+        and aspect_ratio >= float(settings.stacked_text_min_aspect_ratio)
+    )
+
+
+def build_stacked_split_children(source_group, bands, mask_crop, settings):
+    """Build child source groups from horizontal text bands."""
+    bbox = source_group["bbox"]
+    binary = (mask_crop > 0).astype(np.uint8)
+    parent_id = source_group["source_group_id"]
+    padding = int(settings.stacked_text_segment_padding_px)
+    children = []
+
+    for index, band in enumerate(bands, start=1):
+        local_y1 = max(0, int(band["y1"]) - padding)
+        local_y2 = min(binary.shape[0], int(band["y2"]) + padding)
+        band_mask = binary[local_y1:local_y2, :]
+        coordinates = np.argwhere(band_mask > 0)
+        if coordinates.size == 0:
+            continue
+
+        _, local_x_values = coordinates[:, 0], coordinates[:, 1]
+        local_x1 = max(0, int(local_x_values.min()) - padding)
+        local_x2 = min(binary.shape[1], int(local_x_values.max()) + padding + 1)
+
+        child_bbox = {
+            "x1": int(bbox["x1"]) + local_x1,
+            "y1": int(bbox["y1"]) + local_y1,
+            "x2": int(bbox["x1"]) + local_x2,
+            "y2": int(bbox["y1"]) + local_y2,
+        }
+        child = dict(source_group)
+        child["source_group_id"] = f"{parent_id}_line{index:02d}"
+        child["bbox"] = child_bbox
+        child["width"] = bbox_width(child_bbox)
+        child["height"] = bbox_height(child_bbox)
+        child["area"] = bbox_area(child_bbox)
+        child["source_type"] = f"{source_group['source_type']}_stacked_split_child"
+        child["parent_stacked_source_group_id"] = parent_id
+        child["stacked_split_child_index"] = index
+        child["stacked_split_child_count"] = len(bands)
+        child["stacked_split_evidence"] = {
+            "parent_source_group_id": parent_id,
+            "local_band": band,
+            "child_bbox": child_bbox,
+            "reason": "horizontal_projection_separated_text_bands",
+        }
+        child["source"] = dict(source_group.get("source", {}))
+        child["source"]["parent_stacked_source_group_id"] = parent_id
+        children.append(child)
+
+    return children
+
+
+def split_stacked_source_groups(source_groups, masks_by_name, settings):
+    """Split obvious stacked multi-line source groups before crop generation.
+
+    Args:
+        source_groups: Normalized ScribeMap layer groups.
+        masks_by_name: Layer masks from N01 artifacts.
+        settings: RefinerSettings instance.
+
+    Returns:
+        Tuple of:
+            split source group list
+            summary dictionary
+    """
+    output_groups = []
+    events = []
+
+    for source_group in source_groups:
+        if not should_attempt_stacked_text_split(source_group, settings):
+            output_groups.append(source_group)
+            continue
+
+        layer_mask = masks_by_name.get(source_group["layer"])
+        if layer_mask is None:
+            output_groups.append(source_group)
+            continue
+
+        mask_crop, safe_bbox = crop_image(layer_mask, source_group["bbox"])
+        bands = find_horizontal_text_bands(mask_crop, settings)
+        split_method = "inactive_row_bands"
+        if len(bands) < 2:
+            valley_bands = find_projection_valley_split_bands(mask_crop, settings)
+            if valley_bands:
+                bands = valley_bands
+                split_method = "projection_valley"
+        if len(bands) < 2 or len(bands) > int(settings.stacked_text_max_segments):
+            output_groups.append(source_group)
+            continue
+
+        gaps = [
+            int(next_band["y1"] - current_band["y2"])
+            for current_band, next_band in zip(bands, bands[1:])
+        ]
+        if (
+            split_method == "inactive_row_bands"
+            and (not gaps or max(gaps) < int(settings.stacked_text_min_gap_px))
+        ):
+            output_groups.append(source_group)
+            continue
+
+        children = build_stacked_split_children(
+            source_group=source_group,
+            bands=bands,
+            mask_crop=mask_crop,
+            settings=settings,
+        )
+        if len(children) < 2:
+            output_groups.append(source_group)
+            continue
+
+        output_groups.extend(children)
+        events.append({
+            "parent_source_group_id": source_group["source_group_id"],
+            "layer": source_group["layer"],
+            "parent_bbox": dict(source_group["bbox"]),
+            "safe_bbox": safe_bbox,
+            "child_count": len(children),
+            "gaps": gaps,
+            "bands": bands,
+            "split_method": split_method,
+            "child_source_group_ids": [
+                child["source_group_id"]
+                for child in children
+            ],
+        })
+
+    return output_groups, {
+        "enabled": bool(settings.stacked_text_split_enabled),
+        "input_group_count": len(source_groups),
+        "output_group_count": len(output_groups),
+        "split_parent_count": len(events),
+        "added_group_count": len(output_groups) - len(source_groups),
+        "events": events,
+    }
+
+
 def build_refined_record(text_unit_id, source_group, settings):
     """Build one first-pass refined record from one layer source group."""
     final_bbox = pad_bbox(
@@ -1050,6 +1385,14 @@ class CropRefiner:
             "unpaired_deleted_blue_count": 0,
             "relationships": [],
         }
+        stacked_text_split = {
+            "enabled": bool(self.settings.stacked_text_split_enabled),
+            "input_group_count": 0,
+            "output_group_count": 0,
+            "split_parent_count": 0,
+            "added_group_count": 0,
+            "events": [],
+        }
 
         if self.settings.input_mode == "scribemap_2_layers":
             scribemap_result = load_scribemap_result_from_payload(payload)
@@ -1064,6 +1407,11 @@ class CropRefiner:
             correction_routing = apply_red_correction_routing(
                 source_groups=source_groups,
                 red_mask=masks_by_name.get("red"),
+                settings=self.settings,
+            )
+            source_groups, stacked_text_split = split_stacked_source_groups(
+                source_groups=source_groups,
+                masks_by_name=masks_by_name,
                 settings=self.settings,
             )
         else:
@@ -1110,6 +1458,7 @@ class CropRefiner:
             "source_groups": source_groups,
             "refined_groups": refined_groups,
             "correction_routing": correction_routing,
+            "stacked_text_split": stacked_text_split,
             "crops_output_dir": crops_output_dir,
             "refined_crops_dir": crops_output_dir,
             "summary": {
@@ -1120,6 +1469,12 @@ class CropRefiner:
                 ],
                 "promoted_red_count": correction_routing[
                     "promoted_red_count"
+                ],
+                "stacked_split_parent_count": stacked_text_split[
+                    "split_parent_count"
+                ],
+                "stacked_split_added_group_count": stacked_text_split[
+                    "added_group_count"
                 ],
             }
         }

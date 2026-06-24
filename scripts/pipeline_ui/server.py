@@ -1115,6 +1115,135 @@ class PipelineUiApplication:
             "truncated": total_count > len(visible),
         }
 
+    def artifact_context(self, document_id: str, relative_path: str) -> dict:
+        """Return original-document bbox context for an N02 crop artifact."""
+        if not document_id or Path(document_id).name != document_id:
+            raise ValueError("Invalid document id.")
+
+        artifact_path = self.resolve_artifact(relative_path)
+        document_dir = (self.temp_dir / document_id).resolve()
+        if not document_dir.is_relative_to(self.temp_dir.resolve()):
+            raise ValueError("Document path escaped temp_processing.")
+        if not artifact_path.is_relative_to(document_dir):
+            return {
+                "available": False,
+                "reason": "artifact_not_inside_selected_document",
+            }
+
+        document_relative = artifact_path.relative_to(document_dir).as_posix()
+        if "/n02_crop_refiner/crops/" not in f"/{document_relative}":
+            return {
+                "available": False,
+                "reason": "not_an_n02_crop",
+            }
+
+        metadata_path = (
+            document_dir
+            / "n02_crop_refiner"
+            / "metadata"
+            / f"{document_id}_refined_groups.json"
+        )
+        if not metadata_path.is_file():
+            return {
+                "available": False,
+                "reason": "n02_metadata_missing",
+            }
+
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        crop_relative = artifact_path.relative_to(self.base_dir).as_posix()
+        crop_absolute = str(artifact_path)
+        matched_record = None
+        path_fields = (
+            "full_text_crop_path",
+            "classification_crop_path",
+            "analysis_crop_path",
+            "context_crop_path",
+            "analysis_mask_crop_path",
+            "refined_crop_path",
+            "original_crop_path",
+        )
+        for record in payload.get("refined_groups", []):
+            if not isinstance(record, dict):
+                continue
+            for field_name in path_fields:
+                value = record.get(field_name)
+                if not value:
+                    continue
+                value_path = Path(value)
+                if not value_path.is_absolute():
+                    value_path = self.base_dir / value_path
+                try:
+                    value_relative = value_path.resolve().relative_to(
+                        self.base_dir
+                    ).as_posix()
+                except ValueError:
+                    value_relative = ""
+                if (
+                    str(value_path.resolve()) == crop_absolute
+                    or value_relative == crop_relative
+                ):
+                    matched_record = record
+                    break
+            if matched_record is not None:
+                break
+
+        if matched_record is None:
+            return {
+                "available": False,
+                "reason": "crop_not_found_in_n02_metadata",
+            }
+
+        source_path = document_dir / "input_document.png"
+        if not source_path.is_file():
+            source = self._document_sources().get(document_id)
+            source_path = source if source and source.is_file() else source_path
+        if not source_path.is_file():
+            return {
+                "available": False,
+                "reason": "source_document_missing",
+            }
+
+        bbox = (
+            matched_record.get("final_bbox")
+            or matched_record.get("bbox")
+            or matched_record.get("crop_bbox")
+        )
+        if not isinstance(bbox, dict):
+            return {
+                "available": False,
+                "reason": "bbox_missing",
+            }
+
+        return {
+            "available": True,
+            "document_id": document_id,
+            "source_document_url": self._artifact_url_for_path(source_path),
+            "source_document_path": source_path.relative_to(self.base_dir).as_posix(),
+            "crop_path": crop_relative,
+            "bbox": {
+                "x1": int(bbox["x1"]),
+                "y1": int(bbox["y1"]),
+                "x2": int(bbox["x2"]),
+                "y2": int(bbox["y2"]),
+            },
+            "record": {
+                "text_unit_id": matched_record.get("text_unit_id"),
+                "source_group_id": matched_record.get("source_group_id"),
+                "layer": matched_record.get("layer"),
+                "recommended_next_node": matched_record.get("recommended_next_node"),
+                "parent_stacked_source_group_id": (
+                    matched_record.get("source", {})
+                    .get("parent_stacked_source_group_id")
+                    or matched_record.get("parent_stacked_source_group_id")
+                ),
+                "stacked_split_evidence": (
+                    matched_record.get("source", {})
+                    .get("stacked_split_evidence")
+                    or matched_record.get("stacked_split_evidence")
+                ),
+            },
+        }
+
     def resolve_artifact(self, relative_path: str) -> Path:
         """Resolve one image path while enforcing the project boundary."""
         decoded = unquote(relative_path)
@@ -2205,6 +2334,13 @@ def _handler_factory(application: PipelineUiApplication):
                             stage_id=query.get("stage", ["all"])[0],
                             query=query.get("query", [""])[0],
                             limit=int(query.get("limit", ["240"])[0]),
+                        )
+                    )
+                elif parsed.path == "/api/artifact-context":
+                    self._send_json(
+                        application.artifact_context(
+                            document_id=query.get("document", [""])[0],
+                            relative_path=query.get("path", [""])[0],
                         )
                     )
                 elif parsed.path == "/api/aristotel-preview":

@@ -22,10 +22,11 @@ Current Flow
 2. Collect configured blue, red, green, unknown-color, and black groups.
 3. Detect accepted red groups that credibly cross blue text.
 4. Suppress crossed blue groups and promote nearby red replacement writing.
-5. Preserve layer identity and original source-group ids.
-6. Apply a small padded bbox.
-7. Create one canonical full-text crop and one topology mask per group.
-8. Write refined group metadata for N03 and future nodes.
+5. Split obvious stacked multi-line groups before crop generation.
+6. Preserve layer identity and original source-group ids.
+7. Apply a small padded bbox.
+8. Create one canonical full-text crop and one topology mask per group.
+9. Write refined group metadata for N03 and future nodes.
 
 Crop Artifacts
 --------------
@@ -66,6 +67,25 @@ Correction pairing uses actual red pixels from accepted N01 red groups. It
 requires a configurable horizontal or vertical span across the blue bbox, then
 selects up to two nearby red groups large enough to contain writing. Tiny red
 specks and rejected/unmapped red pixels cannot suppress blue text.
+
+Stacked Text Guard
+------------------
+Some N01 groups can accidentally contain two handwritten words stacked above
+each other. N02 now checks suspicious wide/tall groups before crop generation.
+
+The guard first looks for truly separated horizontal ink bands. If the bands
+are connected by tails or stray pixels, it can use a conservative projection
+valley split: a horizontal trough is accepted only when there is enough real
+ink above and below it.
+
+When a split happens, N02 replaces the parent source group with child records:
+
+    <parent_source_group_id>_line01
+    <parent_source_group_id>_line02
+
+The metadata records `stacked_text_split.events` so every split is inspectable.
+This is intentionally conservative; it should prevent obvious two-row crops
+without becoming a general handwriting segmenter.
 
 unknown_color:
     Ambiguous color. Minos performs fallback routing.
@@ -127,10 +147,24 @@ The current CropRefiner actively uses:
     correction_replacement_min_area
     correction_replacement_max_aspect_ratio
     correction_max_replacements_per_blue
+    stacked_text_split_enabled
+    stacked_text_split_layers
+    stacked_text_min_height_px
+    stacked_text_min_width_px
+    stacked_text_min_aspect_ratio
+    stacked_text_row_ink_ratio
+    stacked_text_min_gap_px
+    stacked_text_merge_gap_px
+    stacked_text_projection_valley_enabled
+    stacked_text_projection_valley_max_ratio
+    stacked_text_projection_min_side_ink_ratio
+    stacked_text_min_segment_height_px
+    stacked_text_segment_padding_px
+    stacked_text_max_segments
 
 Artifact Policy
 ---------------
-N02 stores exactly two crop files per source group:
+N02 stores exactly two crop files per refined group:
 
     one full-text visual crop
     one binary topology mask
