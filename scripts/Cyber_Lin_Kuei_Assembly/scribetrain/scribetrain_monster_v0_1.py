@@ -107,6 +107,10 @@ FEATURE_NAMES = (
     "vertical_transition_density",
     "projection_delta",
 )
+SCRISTISTICS_PROFILE_PATH = (
+    PROJECT_ROOT / "datasets" / "scrististics" / "empirical_profiles_limit_100.json"
+)
+_SCRISTISTICS_GEOMETRY_ENVELOPE: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +173,115 @@ def _ink_mask_from_rendered_word(image: np.ndarray, threshold_value: int = 128) 
     if gray.ndim == 3:
         gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)
     return np.where(gray < int(threshold_value), 255, 0).astype(np.uint8)
+
+
+def _scrististics_geometry_envelope() -> dict:
+    """Load a global Armenian-letter geometry envelope from ScriStatistics."""
+
+    global _SCRISTISTICS_GEOMETRY_ENVELOPE
+    if _SCRISTISTICS_GEOMETRY_ENVELOPE is not None:
+        return _SCRISTISTICS_GEOMETRY_ENVELOPE
+
+    fallback = {
+        "available": False,
+        "profile_path": str(SCRISTISTICS_PROFILE_PATH),
+        "reference_image_height": 64.0,
+    }
+    if not SCRISTISTICS_PROFILE_PATH.is_file():
+        _SCRISTISTICS_GEOMETRY_ENVELOPE = fallback
+        return fallback
+
+    try:
+        profile = json.loads(SCRISTISTICS_PROFILE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        _SCRISTISTICS_GEOMETRY_ENVELOPE = fallback
+        return fallback
+
+    classes = profile.get("classes", {})
+    width_p90 = []
+    width_p10 = []
+    height_p90 = []
+    height_p10 = []
+    aspect_p90 = []
+    aspect_p10 = []
+    for class_profile in classes.values():
+        geometry = class_profile.get("geometry_profile", {}) if isinstance(class_profile, dict) else {}
+        for target, feature, key in (
+            (width_p10, "ink_bbox_width", "p10"),
+            (width_p90, "ink_bbox_width", "p90"),
+            (height_p10, "ink_bbox_height", "p10"),
+            (height_p90, "ink_bbox_height", "p90"),
+            (aspect_p10, "ink_aspect_ratio", "p10"),
+            (aspect_p90, "ink_aspect_ratio", "p90"),
+        ):
+            value = geometry.get(feature, {}).get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                target.append(float(value))
+
+    if not width_p90 or not height_p90 or not aspect_p90:
+        _SCRISTISTICS_GEOMETRY_ENVELOPE = fallback
+        return fallback
+
+    envelope = {
+        "available": True,
+        "profile_path": str(SCRISTISTICS_PROFILE_PATH),
+        "reference_image_height": 64.0,
+        "letter_count": len(classes),
+        # These are deliberately broad all-letter envelopes. They reject only
+        # segments that look implausible for almost any Armenian glyph.
+        "width_min_p10": min(width_p10),
+        "width_max_p90": max(width_p90),
+        "height_min_p10": min(height_p10),
+        "height_max_p90": max(height_p90),
+        "aspect_min_p10": min(aspect_p10),
+        "aspect_max_p90": max(aspect_p90),
+    }
+    _SCRISTISTICS_GEOMETRY_ENVELOPE = envelope
+    return envelope
+
+
+def _ink_bbox_for_bin_span(
+    image: np.ndarray | None,
+    start_bin: int,
+    end_bin: int,
+    bin_count: int,
+) -> dict:
+    """Measure an actual ink bbox inside one candidate segment span."""
+
+    if image is None:
+        return {"available": False}
+    mask = _ink_mask_from_rendered_word(image)
+    height, width = mask.shape
+    x1 = int(round(max(0, start_bin) * width / max(1, bin_count)))
+    x2 = int(round(max(start_bin + 1, end_bin) * width / max(1, bin_count)))
+    x1 = max(0, min(width - 1, x1))
+    x2 = max(x1 + 1, min(width, x2))
+    crop = mask[:, x1:x2]
+    coords = cv2.findNonZero(crop)
+    if coords is None:
+        return {
+            "available": True,
+            "image_height": height,
+            "image_width": width,
+            "span_x1": x1,
+            "span_x2": x2,
+            "ink_bbox_width": 0,
+            "ink_bbox_height": 0,
+            "ink_aspect_ratio": 0.0,
+        }
+    x, y, bbox_width, bbox_height = cv2.boundingRect(coords)
+    return {
+        "available": True,
+        "image_height": height,
+        "image_width": width,
+        "span_x1": x1,
+        "span_x2": x2,
+        "ink_bbox_x": int(x1 + x),
+        "ink_bbox_y": int(y),
+        "ink_bbox_width": int(bbox_width),
+        "ink_bbox_height": int(bbox_height),
+        "ink_aspect_ratio": float(bbox_width / max(1, bbox_height)),
+    }
 
 
 def _bin_ranges(width: int, bin_count: int) -> list[tuple[int, int]]:
@@ -754,6 +867,151 @@ def _peak_distance_metrics(
     }
 
 
+def _segment_geometry_for_path(
+    cut_bins: list[int],
+    sequence_features: torch.Tensor | np.ndarray | None,
+    bin_count: int,
+    image: np.ndarray | None = None,
+) -> dict:
+    """Judge whether path segments look like plausible letter units.
+
+    This is the first Scrististics-style geometric head. It does not need
+    retraining: it uses the existing per-bin ScribeTrain features and asks
+    whether each proposed span is suspiciously wide, narrow, empty, or complex.
+    """
+
+    if sequence_features is None:
+        return {
+            "available": False,
+            "segment_count": len(cut_bins) + 1,
+            "path_geometry_penalty": 0.0,
+            "path_geometry_score": 1.0,
+            "segments": [],
+        }
+
+    features = sequence_features.detach().cpu().numpy() if isinstance(sequence_features, torch.Tensor) else np.asarray(sequence_features)
+    if features.ndim != 2 or features.shape[0] <= 0:
+        return {
+            "available": False,
+            "segment_count": len(cut_bins) + 1,
+            "path_geometry_penalty": 0.0,
+            "path_geometry_score": 1.0,
+            "segments": [],
+        }
+
+    safe_bin_count = int(features.shape[0])
+    sorted_cuts = sorted(
+        {
+            max(0, min(safe_bin_count - 1, int(bin_index)))
+            for bin_index in cut_bins
+        }
+    )
+    boundaries = [0, *sorted_cuts, safe_bin_count]
+    segment_count = max(1, len(boundaries) - 1)
+    expected_span = max(1.0, float(safe_bin_count) / float(segment_count))
+    indexes = {name: index for index, name in enumerate(FEATURE_NAMES)}
+    envelope = _scrististics_geometry_envelope()
+    segments = []
+    penalties = []
+
+    for segment_index in range(segment_count):
+        start = int(boundaries[segment_index])
+        end = int(boundaries[segment_index + 1])
+        if segment_index > 0:
+            start = min(safe_bin_count - 1, start + 1)
+        end = max(start + 1, min(safe_bin_count, end))
+        ink_bbox = _ink_bbox_for_bin_span(image, start, end, safe_bin_count)
+        rows = features[start:end]
+        span_bins = max(1, end - start)
+        span_ratio = float(span_bins) / expected_span
+        ink_density = float(rows[:, indexes["ink_density"]].mean()) if rows.size else 0.0
+        skeleton_density = float(rows[:, indexes["skeleton_density"]].mean()) if rows.size else 0.0
+        endpoint_sum = float(rows[:, indexes["endpoint_density"]].sum()) if rows.size else 0.0
+        junction_sum = float(rows[:, indexes["junction_density"]].sum()) if rows.size else 0.0
+        vertical_complexity = float(rows[:, indexes["vertical_transition_density"]].mean()) if rows.size else 0.0
+
+        too_wide_score = max(0.0, min(1.0, (span_ratio - 1.45) / 0.75))
+        too_narrow_score = max(0.0, min(1.0, (0.55 - span_ratio) / 0.35))
+        empty_score = max(0.0, min(1.0, (0.015 - ink_density) / 0.015))
+        complexity_score = max(0.0, min(1.0, (endpoint_sum + junction_sum - 2.8) / 4.0))
+        profile_too_wide = 0.0
+        profile_too_narrow = 0.0
+        profile_aspect_outlier = 0.0
+        if envelope.get("available") and ink_bbox.get("available"):
+            scale = float(ink_bbox.get("image_height", 32)) / max(
+                1.0,
+                float(envelope.get("reference_image_height", 64.0)),
+            )
+            width = float(ink_bbox.get("ink_bbox_width", 0))
+            aspect = float(ink_bbox.get("ink_aspect_ratio", 0.0))
+            width_max = float(envelope.get("width_max_p90", 46.0)) * scale
+            width_min = float(envelope.get("width_min_p10", 9.0)) * scale
+            aspect_max = float(envelope.get("aspect_max_p90", 2.4))
+            aspect_min = float(envelope.get("aspect_min_p10", 0.25))
+            profile_too_wide = max(0.0, min(1.0, (width - width_max * 1.12) / max(1.0, width_max * 0.55)))
+            profile_too_narrow = (
+                max(0.0, min(1.0, (width_min * 0.55 - width) / max(1.0, width_min * 0.55)))
+                if width > 0
+                else 1.0
+            )
+            profile_aspect_outlier = max(
+                max(0.0, min(1.0, (aspect - aspect_max * 1.10) / max(0.25, aspect_max * 0.40))),
+                max(0.0, min(1.0, (aspect_min * 0.80 - aspect) / max(0.10, aspect_min * 0.80))),
+            )
+            too_wide_score = max(too_wide_score, profile_too_wide, 0.65 * profile_aspect_outlier)
+            too_narrow_score = max(too_narrow_score, profile_too_narrow)
+        likely_joined_score = max(too_wide_score, min(1.0, 0.55 * too_wide_score + 0.45 * complexity_score))
+        fragment_score = max(too_narrow_score, empty_score)
+        plausible_score = max(
+            0.0,
+            1.0
+            - max(too_wide_score, too_narrow_score)
+            - 0.35 * empty_score
+            - 0.20 * complexity_score,
+        )
+        penalty = max(likely_joined_score, fragment_score)
+        penalties.append(penalty)
+        segments.append(
+            {
+                "segment_index": segment_index,
+                "start_bin": start,
+                "end_bin": end,
+                "span_bins": span_bins,
+                "span_ratio": span_ratio,
+                "ink_density": ink_density,
+                "skeleton_density": skeleton_density,
+                "endpoint_sum": endpoint_sum,
+                "junction_sum": junction_sum,
+                "vertical_complexity": vertical_complexity,
+                "ink_bbox": ink_bbox,
+                "scrististics_profile": {
+                    "available": bool(envelope.get("available")),
+                    "profile_too_wide": profile_too_wide,
+                    "profile_too_narrow": profile_too_narrow,
+                    "profile_aspect_outlier": profile_aspect_outlier,
+                },
+                "too_wide": too_wide_score,
+                "too_narrow": too_narrow_score,
+                "likely_joined_letters": likely_joined_score,
+                "likely_fragment": fragment_score,
+                "plausible_single_letter": plausible_score,
+            }
+        )
+
+    mean_penalty = float(sum(penalties) / max(1, len(penalties)))
+    max_penalty = float(max(penalties) if penalties else 0.0)
+    path_penalty = 0.65 * mean_penalty + 0.35 * max_penalty
+    return {
+        "available": True,
+        "segment_count": segment_count,
+        "expected_span_bins": expected_span,
+        "path_geometry_penalty": path_penalty,
+        "path_geometry_score": max(0.0, 1.0 - path_penalty),
+        "suspicious_segment_count": sum(1 for value in penalties if value >= 0.50),
+        "segments": segments,
+    }
+
+
 def build_segmentation_paths(
     boundary_probabilities: torch.Tensor,
     bridge_probabilities: torch.Tensor,
@@ -767,6 +1025,10 @@ def build_segmentation_paths(
     length_penalty_strength: float = 2.0,
     image: np.ndarray | None = None,
     snap_radius_bins: int = 0,
+    recall_threshold: float | None = None,
+    recall_candidate_limit: int = 32,
+    sequence_features: torch.Tensor | np.ndarray | None = None,
+    segment_geometry_weight: float = 0.15,
 ) -> list[dict]:
     """Build ranked segmentation paths from ScribeTrain head outputs.
 
@@ -783,6 +1045,10 @@ def build_segmentation_paths(
         length_penalty_strength: Multiplier for punishing wrong cut counts.
         image: Optional rendered word image used to snap cuts to low-ink valleys.
         snap_radius_bins: Maximum left/right bin search for geometric snapping.
+        recall_threshold: Optional lower threshold for recall-oriented candidates.
+        recall_candidate_limit: Maximum lower-threshold candidates to expose.
+        sequence_features: Optional per-bin features for segment plausibility.
+        segment_geometry_weight: Score penalty weight for implausible segments.
 
     Returns:
         Ranked JSON-safe path candidates. Each path stores selected cut bins
@@ -799,6 +1065,14 @@ def build_segmentation_paths(
         min_distance=min_distance,
     )[0]
     peaks = _positive_bin_indices(peak_mask)
+    recall_peaks: list[int] = []
+    if recall_threshold is not None and float(recall_threshold) < float(threshold):
+        recall_mask = decode_boundary_peaks(
+            boundary.unsqueeze(0),
+            threshold=float(recall_threshold),
+            min_distance=max(1, min_distance),
+        )[0]
+        recall_peaks = _positive_bin_indices(recall_mask)
 
     def make_cut_candidate(bin_index: int, source: str) -> dict:
         """Create one cut candidate from peak decoding or the raw boundary map."""
@@ -821,6 +1095,20 @@ def build_segmentation_paths(
         candidates.append(make_cut_candidate(int(bin_index), "decoded_peak"))
 
     candidates.sort(key=lambda item: (-item["score"], item["bin"]))
+    primary_bins = {int(item["bin"]) for item in candidates}
+
+    recall_candidates = []
+    for bin_index in recall_peaks:
+        if any(abs(int(bin_index) - primary_bin) < min_distance for primary_bin in primary_bins):
+            continue
+        recall_candidates.append(make_cut_candidate(int(bin_index), "recall_peak"))
+    recall_candidates.sort(key=lambda item: (-item["score"], item["bin"]))
+    recall_candidates = recall_candidates[: max(0, int(recall_candidate_limit))]
+
+    expanded_candidates = sorted(
+        [*candidates, *recall_candidates],
+        key=lambda item: (-item["score"], item["bin"]),
+    )
 
     def bin_is_available(bin_index: int, existing_cuts: list[dict]) -> bool:
         """Keep raw-fill cuts separated from already selected cuts."""
@@ -832,7 +1120,7 @@ def build_segmentation_paths(
 
         if target_count <= 0:
             return []
-        filled = list(candidates[: min(len(candidates), target_count)])
+        filled = list(expanded_candidates[: min(len(expanded_candidates), target_count)])
         if len(filled) >= target_count:
             return sorted(filled, key=lambda item: item["bin"])
 
@@ -908,6 +1196,16 @@ def build_segmentation_paths(
             )
         )
 
+    expanded_selected = sorted(expanded_candidates, key=lambda item: item["bin"])
+    if recall_candidates and expanded_selected:
+        candidate_sets.append(
+            (
+                "recall_expanded_peaks",
+                expanded_selected,
+                "primary peaks plus lower-threshold recall peaks",
+            )
+        )
+
     if expected_split_count is not None:
         target = max(0, int(expected_split_count))
         raw_fill_path = build_length_complete_raw_fill_path(target)
@@ -919,6 +1217,19 @@ def build_segmentation_paths(
                     "length-complete path filled from raw boundary probabilities",
                 )
             )
+        if recall_candidates:
+            for delta in (0, -1, 1):
+                keep_count = target + delta
+                if keep_count <= 0 or keep_count > len(expanded_candidates):
+                    continue
+                kept = sorted(expanded_candidates[:keep_count], key=lambda item: item["bin"])
+                candidate_sets.append(
+                    (
+                        f"recall_length_prior_keep_{keep_count}",
+                        kept,
+                        f"length-aware path using recall pool keeping {keep_count} strongest cuts",
+                    )
+                )
     if expected_split_count is not None and candidates:
         target = max(0, int(expected_split_count))
         for delta in (0, -1, 1, -2, 2):
@@ -960,6 +1271,14 @@ def build_segmentation_paths(
             continue
         seen.add(cut_bins)
         path_score, score_parts = score_path(snapped_cuts)
+        segment_geometry = _segment_geometry_for_path(
+            list(cut_bins),
+            sequence_features,
+            bin_count=int(boundary.numel()),
+            image=image,
+        )
+        geometry_penalty = float(segment_geometry.get("path_geometry_penalty", 0.0))
+        path_score -= float(segment_geometry_weight) * geometry_penalty
         paths.append(
             {
                 "path_id": f"p{len(paths)}_{name}",
@@ -969,6 +1288,8 @@ def build_segmentation_paths(
                 "expected_split_count": expected_split_count,
                 "length_confidence": float(length_confidence),
                 "snap_radius_bins": int(max(0, snap_radius_bins)),
+                "segment_geometry_weight": float(segment_geometry_weight),
+                "segment_geometry": segment_geometry,
                 **score_parts,
                 "cuts": snapped_cuts,
                 "reason": reason,
@@ -1119,6 +1440,55 @@ def _path_topk_metric_hits(paths: list[dict], true_bins: list[int]) -> dict:
         metrics["path_zero_cut_truth"] and metrics["path_zero_cut_predicted_top1"]
     )
     return metrics
+
+
+def _path_candidate_cut_coverage(
+    paths: list[dict],
+    true_bins: list[int],
+    tolerance: int = 2,
+) -> dict:
+    """Measure whether true cuts exist anywhere in the proposed path universe.
+
+    This separates a path-ranking failure from a proposal-recall failure. If a
+    true cut has no candidate within tolerance in any top-k path, reranking the
+    paths cannot recover the correct split.
+    """
+
+    candidate_bins = sorted(
+        {
+            int(bin_index)
+            for path in paths
+            for bin_index in path.get("cut_bins", [])
+        }
+    )
+    if not true_bins:
+        return {
+            "candidate_cut_count": len(candidate_bins),
+            "true_cut_count": 0,
+            "covered_true_cut_count": 0,
+            "missing_true_cut_count": 0,
+            "coverage_ratio": 1.0,
+            "all_true_cuts_covered": True,
+            "missing_true_bins": [],
+        }
+
+    missing = []
+    covered = 0
+    for true_bin in true_bins:
+        if any(abs(candidate_bin - true_bin) <= tolerance for candidate_bin in candidate_bins):
+            covered += 1
+        else:
+            missing.append(int(true_bin))
+
+    return {
+        "candidate_cut_count": len(candidate_bins),
+        "true_cut_count": len(true_bins),
+        "covered_true_cut_count": covered,
+        "missing_true_cut_count": len(missing),
+        "coverage_ratio": covered / max(1, len(true_bins)),
+        "all_true_cuts_covered": len(missing) == 0,
+        "missing_true_bins": missing,
+    }
 
 
 def scribetrain_utility_score(metrics: dict, weights: dict | None = None) -> float:
@@ -1290,6 +1660,9 @@ def evaluate(
     length_path_weight: float = 0.25,
     length_penalty_strength: float = 2.0,
     snap_radius_bins: int = 0,
+    recall_threshold: float | None = None,
+    recall_candidate_limit: int = 32,
+    segment_geometry_weight: float = 0.15,
 ) -> dict:
     """Evaluate the model on one split.
 
@@ -1307,6 +1680,9 @@ def evaluate(
         length_path_weight: How strongly predicted length influences paths.
         length_penalty_strength: Multiplier for wrong-cut-count penalties.
         snap_radius_bins: Local bin radius for snapping cuts to ink valleys.
+        recall_threshold: Optional lower threshold for recall-oriented candidates.
+        recall_candidate_limit: Maximum lower-threshold candidates to expose.
+        segment_geometry_weight: Score penalty weight for implausible segments.
 
     Returns:
         JSON-safe metrics.
@@ -1333,6 +1709,18 @@ def evaluate(
         "path_top5_count_exact": 0,
         "path_zero_cut_truth_count": 0,
         "path_zero_cut_top1_exact": 0,
+    }
+    coverage_counts = {
+        "coverage_within_1_sum": 0.0,
+        "coverage_within_2_sum": 0.0,
+        "all_covered_within_1": 0,
+        "all_covered_within_2": 0,
+        "missing_within_1_sum": 0,
+        "missing_within_2_sum": 0,
+        "true_cut_total": 0,
+        "covered_true_cut_within_1_total": 0,
+        "covered_true_cut_within_2_total": 0,
+        "candidate_cut_count_sum": 0,
     }
     path_metric_total = 0
 
@@ -1415,10 +1803,52 @@ def evaluate(
                     length_penalty_strength=length_penalty_strength,
                     image=batch["images"][item_index],
                     snap_radius_bins=snap_radius_bins,
+                    recall_threshold=recall_threshold,
+                    recall_candidate_limit=recall_candidate_limit,
+                    sequence_features=features[item_index].detach().cpu(),
+                    segment_geometry_weight=segment_geometry_weight,
                 )
                 true_cut_bins = _positive_bin_indices(truth[item_index])
                 path_hits = _path_topk_metric_hits(paths, true_cut_bins)
+                coverage_within_1 = _path_candidate_cut_coverage(
+                    paths,
+                    true_cut_bins,
+                    tolerance=1,
+                )
+                coverage_within_2 = _path_candidate_cut_coverage(
+                    paths,
+                    true_cut_bins,
+                    tolerance=max(2, snap_radius_bins),
+                )
                 path_metric_total += 1
+                coverage_counts["coverage_within_1_sum"] += coverage_within_1[
+                    "coverage_ratio"
+                ]
+                coverage_counts["coverage_within_2_sum"] += coverage_within_2[
+                    "coverage_ratio"
+                ]
+                coverage_counts["all_covered_within_1"] += int(
+                    coverage_within_1["all_true_cuts_covered"]
+                )
+                coverage_counts["all_covered_within_2"] += int(
+                    coverage_within_2["all_true_cuts_covered"]
+                )
+                coverage_counts["missing_within_1_sum"] += int(
+                    coverage_within_1["missing_true_cut_count"]
+                )
+                coverage_counts["missing_within_2_sum"] += int(
+                    coverage_within_2["missing_true_cut_count"]
+                )
+                coverage_counts["true_cut_total"] += int(coverage_within_2["true_cut_count"])
+                coverage_counts["covered_true_cut_within_1_total"] += int(
+                    coverage_within_1["covered_true_cut_count"]
+                )
+                coverage_counts["covered_true_cut_within_2_total"] += int(
+                    coverage_within_2["covered_true_cut_count"]
+                )
+                coverage_counts["candidate_cut_count_sum"] += int(
+                    coverage_within_2["candidate_cut_count"]
+                )
                 for k in (1, 3, 5):
                     path_metric_counts[f"path_top{k}_exact"] += int(
                         path_hits[f"path_top{k}_exact_hit"]
@@ -1448,6 +1878,8 @@ def evaluate(
                         "length_confidence": length_confidence,
                         "length_prior_source": "ScribeTrain length head / Scrististics-style path prior",
                         "path_metric_hits": path_hits,
+                        "candidate_cut_coverage_within_1": coverage_within_1,
+                        "candidate_cut_coverage_within_2": coverage_within_2,
                         "predicted_paths": paths,
                     }
                 )
@@ -1471,6 +1903,35 @@ def evaluate(
         "path_zero_cut_top1_exact": (
             path_metric_counts["path_zero_cut_top1_exact"]
             / max(1, path_metric_counts["path_zero_cut_truth_count"])
+        ),
+        "candidate_true_cut_coverage_within_1": (
+            coverage_counts["coverage_within_1_sum"] / max(1, path_metric_total)
+        ),
+        "candidate_true_cut_coverage_within_2": (
+            coverage_counts["coverage_within_2_sum"] / max(1, path_metric_total)
+        ),
+        "candidate_all_true_cuts_covered_within_1": (
+            coverage_counts["all_covered_within_1"] / max(1, path_metric_total)
+        ),
+        "candidate_all_true_cuts_covered_within_2": (
+            coverage_counts["all_covered_within_2"] / max(1, path_metric_total)
+        ),
+        "candidate_missing_true_cut_mean_within_1": (
+            coverage_counts["missing_within_1_sum"] / max(1, path_metric_total)
+        ),
+        "candidate_missing_true_cut_mean_within_2": (
+            coverage_counts["missing_within_2_sum"] / max(1, path_metric_total)
+        ),
+        "candidate_true_cut_micro_coverage_within_1": (
+            coverage_counts["covered_true_cut_within_1_total"]
+            / max(1, coverage_counts["true_cut_total"])
+        ),
+        "candidate_true_cut_micro_coverage_within_2": (
+            coverage_counts["covered_true_cut_within_2_total"]
+            / max(1, coverage_counts["true_cut_total"])
+        ),
+        "candidate_cut_count_mean": (
+            coverage_counts["candidate_cut_count_sum"] / max(1, path_metric_total)
         ),
         **{
             key: value / max(1, path_metric_total)
@@ -1590,6 +2051,10 @@ def train(settings: dict, limit: int | None = None) -> dict:
     length_path_weight = float(training_settings.get("length_path_weight", 0.25))
     length_penalty_strength = float(training_settings.get("length_penalty_strength", 2.0))
     snap_radius_bins = int(training_settings.get("snap_radius_bins", 2))
+    recall_threshold = training_settings.get("recall_threshold", 0.12)
+    recall_threshold = None if recall_threshold is None else float(recall_threshold)
+    recall_candidate_limit = int(training_settings.get("recall_candidate_limit", 32))
+    segment_geometry_weight = float(training_settings.get("segment_geometry_weight", 0.15))
     utility_weights = dict(
         training_settings.get(
             "utility_weights",
@@ -1675,6 +2140,9 @@ def train(settings: dict, limit: int | None = None) -> dict:
             length_path_weight=length_path_weight,
             length_penalty_strength=length_penalty_strength,
             snap_radius_bins=snap_radius_bins,
+            recall_threshold=recall_threshold,
+            recall_candidate_limit=recall_candidate_limit,
+            segment_geometry_weight=segment_geometry_weight,
         )
         validation_utility = scribetrain_utility_score(validation_metrics, utility_weights)
         epoch_record = {
@@ -1729,6 +2197,9 @@ def train(settings: dict, limit: int | None = None) -> dict:
         length_path_weight=length_path_weight,
         length_penalty_strength=length_penalty_strength,
         snap_radius_bins=snap_radius_bins,
+        recall_threshold=recall_threshold,
+        recall_candidate_limit=recall_candidate_limit,
+        segment_geometry_weight=segment_geometry_weight,
     )
     test_utility = scribetrain_utility_score(test_metrics, utility_weights)
     report = {
@@ -1764,6 +2235,9 @@ def train(settings: dict, limit: int | None = None) -> dict:
             "length_path_prior": length_path_weight,
             "length_penalty_strength": length_penalty_strength,
             "snap_radius_bins": snap_radius_bins,
+            "recall_threshold": recall_threshold,
+            "recall_candidate_limit": recall_candidate_limit,
+            "segment_geometry_weight": segment_geometry_weight,
         },
         "top_k_path_examples": test_metrics.get("path_examples", []),
         "test": test_metrics,
@@ -1790,6 +2264,222 @@ def train(settings: dict, limit: int | None = None) -> dict:
     return report
 
 
+def write_checkpoint_report(
+    settings: dict,
+    checkpoint_path: Path | None = None,
+    limit: int | None = None,
+) -> dict:
+    """Evaluate a saved ScribeTrain checkpoint and write a report.
+
+    This is the recovery path for interrupted training runs. Checkpoints are
+    saved during training, but the full JSON report is only written after final
+    test evaluation. This function lets a surviving ``.pt`` checkpoint produce
+    validation/test metrics later without retraining.
+    """
+
+    started = time.time()
+    output_settings = settings["output"]
+    report_dir = resolve_path(output_settings["report_dir"])
+    model_dir = resolve_path(output_settings["model_dir"])
+    model_name = settings.get("model_name", "scribetrace_word_sequence_v0_1")
+    checkpoint_path = checkpoint_path or (model_dir / f"{model_name}.pt")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint_settings = checkpoint.get("settings")
+    if isinstance(checkpoint_settings, dict):
+        settings = checkpoint_settings
+        output_settings = settings["output"]
+        report_dir = resolve_path(output_settings["report_dir"])
+        model_dir = resolve_path(output_settings["model_dir"])
+        model_name = settings.get("model_name", model_name)
+
+    dataset_settings = settings["dataset"]
+    training_settings = settings["training"]
+    train_count = int(limit or dataset_settings.get("samples", 8000))
+    validation_count, test_count, evaluation_split_policy = _evaluation_counts_for_train_size(
+        train_count,
+        dataset_settings,
+        limited_run=bool(limit),
+    )
+    batch_size = int(training_settings.get("batch_size", 96))
+    workers = int(training_settings.get("num_workers", 0))
+    device = _choose_device(settings)
+    label_map = load_label_map(dataset_settings["label_map_path"])
+    char_to_token, token_to_char = build_token_maps(label_map)
+    all_words = load_word_samples(settings, char_to_token)
+    train_words, validation_words, test_words = split_word_pools(
+        all_words,
+        seed=int(settings.get("random_seed", 42)),
+    )
+    tail_profiles = build_tail_profiles(token_to_char)
+    glyph_paths = collect_glyph_paths(dataset_settings["matenadata_dir"], label_map)
+
+    validation_set = ScribeTrainSyntheticWordDataset(
+        settings,
+        "validation",
+        validation_count,
+        seed_offset=1_000_000,
+        words=validation_words,
+        glyph_paths=glyph_paths,
+        tail_profiles=tail_profiles,
+    )
+    test_set = ScribeTrainSyntheticWordDataset(
+        settings,
+        "test",
+        test_count,
+        seed_offset=2_000_000,
+        words=test_words,
+        glyph_paths=glyph_paths,
+        tail_profiles=tail_profiles,
+    )
+    validation_loader = DataLoader(
+        validation_set,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=workers,
+        collate_fn=collate_sequence_samples,
+    )
+    test_loader = DataLoader(
+        test_set,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=workers,
+        collate_fn=collate_sequence_samples,
+    )
+
+    model = ScribeTrainWordTraceModel(
+        feature_count=len(FEATURE_NAMES),
+        hidden_size=int(training_settings.get("hidden_size", 96)),
+        num_layers=int(training_settings.get("num_layers", 2)),
+        dropout=float(training_settings.get("dropout", 0.15)),
+        max_length_class=int(dataset_settings.get("max_sequence_length", 18)),
+    ).to(device)
+    model.load_state_dict(checkpoint["state_dict"])
+
+    peak_threshold = float(training_settings.get("peak_threshold", 0.35))
+    peak_min_distance = int(training_settings.get("peak_min_distance_bins", 2))
+    length_path_weight = float(training_settings.get("length_path_weight", 0.25))
+    length_penalty_strength = float(training_settings.get("length_penalty_strength", 2.0))
+    snap_radius_bins = int(training_settings.get("snap_radius_bins", 2))
+    recall_threshold = training_settings.get("recall_threshold", 0.12)
+    recall_threshold = None if recall_threshold is None else float(recall_threshold)
+    recall_candidate_limit = int(training_settings.get("recall_candidate_limit", 32))
+    segment_geometry_weight = float(training_settings.get("segment_geometry_weight", 0.15))
+    utility_weights = dict(
+        checkpoint.get(
+            "utility_weights",
+            training_settings.get(
+                "utility_weights",
+                {
+                    "peak_f1": 0.55,
+                    "peak_count_pm1": 0.25,
+                    "length_accuracy": 0.15,
+                    "path_top5_count_exact": 0.05,
+                },
+            ),
+        )
+    )
+    max_debug_images = int(output_settings.get("max_boundary_debug_images", 12))
+    max_path_examples = int(output_settings.get("max_path_examples", 12))
+    path_top_k = int(output_settings.get("path_top_k", 5))
+    debug_root = report_dir / "checkpoint_boundary_debug"
+
+    print(
+        "checkpoint split:",
+        f"train_reference={train_count}",
+        f"validation={validation_count}",
+        f"test={test_count}",
+        f"policy={evaluation_split_policy}",
+    )
+    validation_metrics = evaluate(
+        model,
+        validation_loader,
+        device,
+        debug_dir=debug_root / "validation",
+        split_name="checkpoint_validation",
+        max_debug_images=max_debug_images,
+        peak_threshold=peak_threshold,
+        peak_min_distance=peak_min_distance,
+        max_path_examples=min(3, max_path_examples),
+        path_top_k=path_top_k,
+        length_path_weight=length_path_weight,
+        length_penalty_strength=length_penalty_strength,
+        snap_radius_bins=snap_radius_bins,
+        recall_threshold=recall_threshold,
+        recall_candidate_limit=recall_candidate_limit,
+        segment_geometry_weight=segment_geometry_weight,
+    )
+    test_metrics = evaluate(
+        model,
+        test_loader,
+        device,
+        debug_dir=debug_root / "test",
+        split_name="checkpoint_test",
+        max_debug_images=max_debug_images,
+        peak_threshold=peak_threshold,
+        peak_min_distance=peak_min_distance,
+        max_path_examples=max_path_examples,
+        path_top_k=path_top_k,
+        length_path_weight=length_path_weight,
+        length_penalty_strength=length_penalty_strength,
+        snap_radius_bins=snap_radius_bins,
+        recall_threshold=recall_threshold,
+        recall_candidate_limit=recall_candidate_limit,
+        segment_geometry_weight=segment_geometry_weight,
+    )
+    validation_utility = scribetrain_utility_score(validation_metrics, utility_weights)
+    test_utility = scribetrain_utility_score(test_metrics, utility_weights)
+    report = {
+        "model_name": model_name,
+        "status": "checkpoint_evaluated",
+        "checkpoint_path": str(checkpoint_path),
+        "feature_names": list(checkpoint.get("feature_names", FEATURE_NAMES)),
+        "checkpoint": {
+            "best_epoch": checkpoint.get("best_epoch"),
+            "best_validation_utility_score": checkpoint.get("best_validation_utility_score"),
+            "best_validation_peak_f1": checkpoint.get("best_validation_peak_f1"),
+        },
+        "split": {
+            "train_reference": train_count,
+            "validation": validation_count,
+            "test": test_count,
+            "evaluation_policy": evaluation_split_policy,
+        },
+        "word_pool_split": {
+            "source_word_count": len(all_words),
+            "train_unique_words": len(train_words),
+            "validation_unique_words": len(validation_words),
+            "test_unique_words": len(test_words),
+            "policy": "unique word text split before synthetic sampling",
+        },
+        "boundary_debug_dir": str(debug_root),
+        "device": str(device),
+        "validation_utility_score": validation_utility,
+        "test_utility_score": test_utility,
+        "utility_weights": utility_weights,
+        "validation": validation_metrics,
+        "test": test_metrics,
+        "top_k_path_examples": test_metrics.get("path_examples", []),
+        "elapsed_seconds": round(time.time() - started, 3),
+        "notes": [
+            "Generated from a saved checkpoint after an interrupted training run.",
+            "No training was performed while creating this report.",
+        ],
+    }
+    report_path = save_json(report, report_dir / "checkpoint_report.json")
+    print(f"checkpoint: {checkpoint_path}")
+    print(f"report:     {report_path}")
+    print(
+        "checkpoint test:",
+        f"boundary_f1={test_metrics['boundary_f1']:.4f}",
+        f"boundary_recall={test_metrics['boundary_recall']:.4f}",
+        f"peak_f1={test_metrics['peak_f1']:.4f}",
+        f"peak_count_pm1={test_metrics['peak_split_count_within_1_accuracy']:.4f}",
+        f"length={test_metrics['length_accuracy']:.4f}",
+        f"utility={test_utility:.4f}",
+    )
+    return report
+
+
 def main() -> None:
     """CLI entrypoint for the sequence splitter trainer."""
 
@@ -1797,10 +2487,28 @@ def main() -> None:
     parser.add_argument("--settings", default=str(DEFAULT_SETTINGS_PATH))
     parser.add_argument("--limit", type=int, default=0, help="Override train sample count for smoke tests.")
     parser.add_argument("--epochs", type=int, default=0, help="Override epoch count.")
+    parser.add_argument(
+        "--checkpoint-report",
+        action="store_true",
+        help="Evaluate a saved checkpoint and write checkpoint_report.json without training.",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        default="",
+        help="Optional checkpoint path for --checkpoint-report.",
+    )
     args = parser.parse_args()
     settings = load_json(args.settings)
     if args.epochs:
         settings.setdefault("training", {})["epochs"] = int(args.epochs)
+    if args.checkpoint_report:
+        checkpoint_path = Path(args.checkpoint) if args.checkpoint else None
+        write_checkpoint_report(
+            settings,
+            checkpoint_path=checkpoint_path,
+            limit=args.limit or None,
+        )
+        return
     train(settings, limit=args.limit or None)
 
 

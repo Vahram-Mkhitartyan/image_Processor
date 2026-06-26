@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from .evidence_fusion import build_assembly_summary
 from .letter_matrix import build_letter_matrix
+from .local_interrogation import apply_local_interrogation
 from .matrix_envelope import build_matrix_envelope
 from .schemas import ASSEMBLY_VERSION
 from .segment_artifacts import materialize_selected_segments
@@ -41,6 +42,10 @@ def build_assembly_map(
     segment_settings = settings.get("segment_artifacts", {})
     segmentation_matrix = build_segmentation_matrix(
         handwritten_text_units,
+        settings=segmentation_settings,
+    )
+    segmentation_matrix = apply_local_interrogation(
+        segmentation_matrix,
         settings=segmentation_settings,
     )
     assembly_map = {

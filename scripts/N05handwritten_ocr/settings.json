@@ -38,7 +38,14 @@
       "word_ocr_max_boundaries": 12,
       "word_ocr_alignment_score_boost": 0.15,
       "word_ocr_length_agreement_boost": 0.08,
-      "whole_unit_word_ocr_multi_letter_penalty": 0.35
+      "whole_unit_word_ocr_multi_letter_penalty": 0.35,
+      "enable_local_interrogation": true,
+      "local_interrogation_too_wide_ratio": 1.65,
+      "local_interrogation_too_narrow_ratio": 0.45,
+      "local_interrogation_suspicion_penalty": 0.18,
+      "local_interrogation_split_bonus": 0.08,
+      "local_interrogation_max_alternatives_per_path": 2,
+      "local_interrogation_min_split_width_px": 4
     },
     "segment_artifacts": {
       "enabled": true

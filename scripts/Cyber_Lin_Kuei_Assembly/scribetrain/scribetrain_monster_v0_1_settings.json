@@ -80,6 +80,9 @@
     "length_path_weight": 0.25,
     "length_penalty_strength": 2.0,
     "snap_radius_bins": 2,
+    "recall_threshold": 0.12,
+    "recall_candidate_limit": 32,
+    "segment_geometry_weight": 0.15,
     "utility_weights": {
       "peak_f1": 0.55,
       "peak_count_pm1": 0.25,
