@@ -43,6 +43,7 @@ failed_results/
 reports/
 scan_report/
 test_color_masks/
+graphify-out/
 
 # Logs, archives, and operating-system files
 *.log

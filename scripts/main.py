@@ -46,6 +46,20 @@ CLASS_FOLDERS = [
 LINE_COUNT_EXCLUDED_DIRS = {
     "__pycache__",
     "scan_report",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    "CNN_environment.venv",
+    "graphify-out",
+    "node_modules",
+    "dist",
+    "build",
+}
+
+LINE_COUNT_EXCLUDED_FILES = {
+    "result.json",
 }
 
 SUPPORTED_DOCUMENT_EXTENSIONS = {
@@ -724,6 +738,9 @@ def collect_project_line_counts():
         is_legacy = "legacy" in path_parts
 
         for file_name in files:
+            if file_name in LINE_COUNT_EXCLUDED_FILES:
+                continue
+
             file_path = os.path.join(root, file_name)
             extension = os.path.splitext(file_name)[1].lower()
 
@@ -747,6 +764,9 @@ def collect_project_line_counts():
                 if directory not in LINE_COUNT_EXCLUDED_DIRS
             ]
             for file_name in files:
+                if file_name in LINE_COUNT_EXCLUDED_FILES:
+                    continue
+
                 file_path = os.path.join(root, file_name)
                 extension = os.path.splitext(file_name)[1].lower()
                 if extension == ".py":

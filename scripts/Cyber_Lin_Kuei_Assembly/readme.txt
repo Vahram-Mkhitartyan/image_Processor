@@ -301,3 +301,13 @@ It remains pinned to v0.2.1 after training. Change `model_name` to
 `scribetrace_random_forest_v4_0` only after reviewing the full clean and
 degraded benchmark reports. If the selected installation is incomplete,
 runtime safely falls back to the proven model.
+
+### ScribeTrace Word Sequence Splitter
+
+`scribetrace_word_sequence_trainer.py` is the PyTorch splitter-first version of the ScribeTrace word experiment. It renders synthetic Armenian words, extracts left-to-right ScribeTrace-style topology features, and trains boundary/length heads. Use it when the goal is better character split proposals rather than direct word OCR.
+
+Smoke:
+
+```bash
+.venv/bin/python -u scripts/Cyber_Lin_Kuei_Assembly/scribetrace_word_sequence_trainer.py --limit 64 --epochs 2
+```
