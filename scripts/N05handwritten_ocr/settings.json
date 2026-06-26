@@ -56,7 +56,12 @@
       "enable_theoretical_reconstruction": false
     },
     "character_detector": {
-      "enabled": false
+      "enabled": true,
+      "model_name": "glyph_classifier_v0_2_aristotel",
+      "model_path": "models/glyph_classifier_v0_2_aristotel/glyph_classifier_v0_2_aristotel_best.pt",
+      "label_map_path": "scripts/N05handwritten_ocr/character_detector/numeric_label_map.json",
+      "top_k": 5,
+      "device": "auto"
     },
     "word_level_ocr": {
       "enabled": true,

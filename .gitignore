@@ -52,3 +52,7 @@ test_color_masks/
 *.tgz
 .DS_Store
 Thumbs.db
+
+# Local Docker packaging experiments
+.dockerignore
+Dockerfile.wordocr

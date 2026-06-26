@@ -16,6 +16,25 @@ The active baseline is:
 It is a four-block PyTorch CNN trained on 78 Matenadata classes at 64x64. Model
 weights are cached after the first prediction.
 
+The current experimental Aristotel-trained checkpoint is:
+
+    models/glyph_classifier_v0_2_aristotel/
+        glyph_classifier_v0_2_aristotel_best.pt
+
+Training report:
+
+    reports/glyph_classifier_v0_2_aristotel/training_report.json
+
+Full Matenadata + lightweight Aristotel training produced:
+
+    best epoch: 6
+    test top-1: 0.6764
+    test top-5: 0.8701
+
+This model is useful evidence, but it is not trusted as a final decision maker.
+Manual N05 segment probes still show domain mismatch on some real masks, so the
+decision matrix should downweight it until a pipeline-mask-trained CNN exists.
+
 Aristotel Training
 ------------------
 The CNN trainer can now add lightweight Aristotel damage variants during
@@ -70,6 +89,14 @@ Standalone Test
 
 N05 Integration
 ---------------
-The implementation is ready, but the expert remains disabled in settings.json.
-N05 currently owns word/text-unit crops; the CNN must be enabled only after a
-character segmentation hypothesis has been selected.
+N05 runs the CNN only on selected assembly segment masks. It should not be run
+on whole word/text-unit crops, because that produces loud but misleading
+single-letter guesses.
+
+Segment outputs are attached under each selected segment as:
+
+    segment.expert_outputs.character_detector
+    segment.character_detector
+
+The current output is evidence for the future decision matrix, not a final OCR
+answer.

@@ -6,8 +6,12 @@ import shutil
 
 try:
     from .assembly import build_assembly_map
+    from .assembly.evidence_fusion import build_assembly_summary
+    from .assembly.letter_matrix import build_letter_matrix
+    from .assembly.matrix_envelope import build_matrix_envelope
     from .character_unit_proposer import propose_character_units
     from .character_detector import get_expert_manifest as get_character_manifest
+    from .character_detector import recognize as recognize_character_detector
     from .scribetrace import get_expert_manifest as get_scribetrace_manifest
     from .scribetrace import recognize as recognize_scribetrace
     from .tesseract_ocr import get_expert_manifest as get_tesseract_manifest
@@ -15,8 +19,12 @@ try:
     from .word_level_ocr import recognize as recognize_word_level
 except ImportError:
     from assembly import build_assembly_map
+    from assembly.evidence_fusion import build_assembly_summary
+    from assembly.letter_matrix import build_letter_matrix
+    from assembly.matrix_envelope import build_matrix_envelope
     from character_unit_proposer import propose_character_units
     from character_detector import get_expert_manifest as get_character_manifest
+    from character_detector import recognize as recognize_character_detector
     from scribetrace import get_expert_manifest as get_scribetrace_manifest
     from scribetrace import recognize as recognize_scribetrace
     from tesseract_ocr import get_expert_manifest as get_tesseract_manifest
@@ -542,6 +550,236 @@ def attach_scribetrace_result(handwritten_text_unit, scribetrace_result):
     return handwritten_text_unit
 
 
+def build_character_detector_context(document_id, entry, path, segment, position):
+    """Build context for one segment-level CNN inference call."""
+    return {
+        "document_id": document_id,
+        "text_unit_id": entry.get("text_unit_id"),
+        "group_id": entry.get("group_id"),
+        "path_id": path.get("path_id"),
+        "path_type": path.get("path_type") or path.get("type"),
+        "segment_id": segment.get("segment_id"),
+        "segment_position": position,
+        "segment_bbox": segment.get("bbox"),
+        "source": "n05_assembly_selected_segment",
+    }
+
+
+def run_character_detector_for_assembly_segments(assembly_map, settings):
+    """Run the pixel CNN on selected N05 assembly segment masks.
+
+    The character detector is intentionally segment-level. Running it on a
+    whole word crop makes the CNN loud and misleading, while selected segment
+    masks match the glyph-level training contract.
+    """
+
+    character_settings = settings.get("experts", {}).get("character_detector", {})
+    if not bool(character_settings.get("enabled", False)):
+        return {
+            "enabled": False,
+            "attempted_segments": 0,
+            "completed_segments": 0,
+            "failed_segments": 0,
+        }
+
+    document_id = assembly_map.get("document_id")
+    attempted = 0
+    completed = 0
+    failed = 0
+
+    for entry in assembly_map.get("segmentation_matrix") or []:
+        for path in entry.get("paths") or []:
+            if path.get("status") != "selected_for_v0_2_segment_artifacts":
+                continue
+            for position, segment in enumerate(path.get("segments") or []):
+                crop_path = segment.get("mask_crop_path") or segment.get("visual_crop_path")
+                if not crop_path:
+                    continue
+                attempted += 1
+                result = recognize_character_detector(
+                    crop_path=crop_path,
+                    context=build_character_detector_context(
+                        document_id=document_id,
+                        entry=entry,
+                        path=path,
+                        segment=segment,
+                        position=position,
+                    ),
+                    settings=character_settings,
+                )
+                segment.setdefault("expert_outputs", {})
+                segment["expert_outputs"]["character_detector"] = result
+                segment["character_detector"] = {
+                    "attempted": bool(result.get("attempted")),
+                    "status": result.get("status"),
+                    "top_candidate": (
+                        (result.get("candidates") or [{}])[0].get("label")
+                        if result.get("candidates")
+                        else None
+                    ),
+                    "top_confidence": (
+                        (result.get("candidates") or [{}])[0].get("confidence")
+                        if result.get("candidates")
+                        else None
+                    ),
+                    "candidate_count": len(result.get("candidates") or []),
+                    "error": result.get("error"),
+                }
+                if result.get("status") == "completed":
+                    completed += 1
+                else:
+                    failed += 1
+
+    for job in assembly_map.get("expert_job_queue") or []:
+        if "character_detector" not in (job.get("experts_needed") or []):
+            continue
+        matching_result = None
+        for entry in assembly_map.get("segmentation_matrix") or []:
+            if entry.get("text_unit_id") != job.get("text_unit_id"):
+                continue
+            for path in entry.get("paths") or []:
+                if path.get("path_id") != job.get("path_id"):
+                    continue
+                for segment in path.get("segments") or []:
+                    if segment.get("segment_id") == job.get("segment_id"):
+                        matching_result = (
+                            segment.get("expert_outputs", {})
+                            .get("character_detector")
+                        )
+                        break
+        if matching_result:
+            job.setdefault("executed_experts", {})
+            job["executed_experts"]["character_detector"] = {
+                "status": matching_result.get("status"),
+                "candidate_count": len(matching_result.get("candidates") or []),
+                "top_candidate": (
+                    (matching_result.get("candidates") or [{}])[0].get("label")
+                    if matching_result.get("candidates")
+                    else None
+                ),
+            }
+
+    summary = {
+        "enabled": True,
+        "attempted_segments": attempted,
+        "completed_segments": completed,
+        "failed_segments": failed,
+    }
+    assembly_map.setdefault("summary", {})
+    assembly_map["summary"]["character_detector_segments"] = summary
+    return summary
+
+
+
+def _job_key(job_or_segment_record):
+    """Build a stable key for matching queued expert jobs after matrix rebuilds."""
+
+    if not isinstance(job_or_segment_record, dict):
+        return None
+    return (
+        str(job_or_segment_record.get("text_unit_id")),
+        str(job_or_segment_record.get("path_id")),
+        str(job_or_segment_record.get("segment_id")),
+    )
+
+
+def _index_executed_job_records(expert_job_queue):
+    """Index existing executed_experts records before rebuilding the envelope."""
+
+    index = {}
+    for job in expert_job_queue or []:
+        key = _job_key(job)
+        if key is None:
+            continue
+        executed = job.get("executed_experts")
+        if executed:
+            index[key] = executed
+    return index
+
+
+def _restore_executed_job_records(expert_job_queue, executed_index):
+    """Restore executed_experts onto newly rebuilt job records."""
+
+    restored = 0
+    for job in expert_job_queue or []:
+        key = _job_key(job)
+        if key in executed_index:
+            job["executed_experts"] = executed_index[key]
+            restored += 1
+    return restored
+
+
+def rebuild_assembly_matrices_after_segment_experts(
+    assembly_map,
+    handwritten_text_units,
+    settings,
+):
+    """Refresh letter/matrix surfaces after selected-segment experts run.
+
+    This is the bridge between:
+        segment["expert_outputs"]  ->  letter_matrix / matrices / summary
+
+    Without this step, segment-level CNN/ScribeTrace evidence exists in the JSON
+    but does not affect the letter matrix.
+    """
+
+    assembly_settings = settings.get("assembly", {})
+    letter_settings = assembly_settings.get("letter_matrix", {})
+    segmentation_matrix = assembly_map.get("segmentation_matrix") or []
+
+    previous_executed_jobs = _index_executed_job_records(
+        assembly_map.get("expert_job_queue") or []
+    )
+    previous_summary = dict(assembly_map.get("summary") or {})
+
+    letter_matrix = build_letter_matrix(
+        handwritten_text_units,
+        segmentation_matrix,
+        settings=letter_settings,
+    )
+
+    envelope = build_matrix_envelope(
+        document_id=assembly_map.get("document_id"),
+        unit_count=len(handwritten_text_units),
+        segmentation_matrix=segmentation_matrix,
+        letter_matrix=letter_matrix,
+    )
+
+    restored_job_count = _restore_executed_job_records(
+        envelope.get("expert_job_queue") or [],
+        previous_executed_jobs,
+    )
+
+    assembly_map["letter_matrix"] = letter_matrix
+    assembly_map.update(envelope)
+
+    rebuilt_summary = build_assembly_summary(
+        assembly_map.get("segmentation_matrix") or [],
+        letter_matrix,
+        matrices=assembly_map.get("matrices", {}),
+        expert_job_queue=assembly_map.get("expert_job_queue", []),
+    )
+
+    # Preserve runtime summaries already written by segment expert runners.
+    for key, value in previous_summary.items():
+        if key.endswith("_segments") or key in {
+            "character_detector_segments",
+            "scribetrace_segments",
+            "segment_expert_rebuild",
+        }:
+            rebuilt_summary[key] = value
+
+    rebuilt_summary["segment_expert_rebuild"] = {
+        "status": "completed",
+        "letter_matrix_rebuilt": True,
+        "matrix_envelope_rebuilt": True,
+        "restored_executed_job_count": restored_job_count,
+    }
+
+    assembly_map["summary"] = rebuilt_summary
+    assembly_map["status"] = "assembled_after_segment_experts"
+    return assembly_map
+
 def summarize_handwritten_text_map(
     visual_routes_payload,
     selected_routes,
@@ -743,6 +981,15 @@ def build_handwriting_expert_map(
         settings=settings.get("assembly", {}),
         output_dir=folders["assembly"],
     )
+    character_detector_segment_summary = run_character_detector_for_assembly_segments(
+        assembly_map=assembly_map,
+        settings=settings,
+    )
+    assembly_map = rebuild_assembly_matrices_after_segment_experts(
+        assembly_map=assembly_map,
+        handwritten_text_units=handwritten_text_units,
+        settings=settings,
+    )
     assembly_path = os.path.join(
         folders["assembly"],
         f"{document_id}_assembly.json",
@@ -760,6 +1007,7 @@ def build_handwriting_expert_map(
         "coordinate_space": "original_document_image",
         "expert_registry": build_expert_registry(settings),
         "summary": summary,
+        "character_detector_segment_summary": character_detector_segment_summary,
         "assembly": assembly_map,
         "assembly_path": assembly_path,
         "handwritten_text_units": handwritten_text_units,
@@ -782,5 +1030,7 @@ __all__ = [
     "build_handwritten_text_unit",
     "build_scribetrace_context_from_unit",
     "create_output_folders",
+    "rebuild_assembly_matrices_after_segment_experts",
+    "run_character_detector_for_assembly_segments",
     "run_scribetrace_for_text_unit",
 ]

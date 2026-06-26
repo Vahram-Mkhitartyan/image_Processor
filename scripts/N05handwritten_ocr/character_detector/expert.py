@@ -21,6 +21,12 @@ EXPERT_NAME = "character_detector"
 def get_expert_manifest(settings=None):
     """Describe the implemented letter-level CNN expert."""
     settings = settings or {}
+    model_path = settings.get("model_path")
+    model_name = (
+        settings.get("model_name")
+        or (Path(model_path).stem.replace("_best", "") if model_path else None)
+        or "glyph_classifier_v0_1"
+    )
     return {
         "expert_name": EXPERT_NAME,
         "display_name": "Character Detector CNN",
@@ -30,7 +36,8 @@ def get_expert_manifest(settings=None):
         "unit_level": "character",
         "returns_text": True,
         "candidate_schema": "n05_candidate_evidence_v1",
-        "model_name": "glyph_classifier_v0_1",
+        "model_name": model_name,
+        "model_path": model_path,
         "recommended_input": "single_character_analysis_mask",
     }
 

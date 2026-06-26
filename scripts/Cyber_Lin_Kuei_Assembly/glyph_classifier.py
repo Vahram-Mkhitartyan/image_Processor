@@ -30,8 +30,6 @@ except Exception:
 # Config
 # ============================================================
 
-from pathlib import Path
-
 PROJECT_ROOT = Path("/home/vahram/Desktop/image_Processor")
 
 # Sacred read-only dataset archive.
@@ -47,7 +45,7 @@ LABEL_MAP_PATH = (
     / "numeric_label_map.json"
 )
 
-MODEL_NAME = "glyph_classifier_v0_1"
+MODEL_NAME = "glyph_classifier_v0_3_white_ink"
 
 # All generated training artifacts go outside Matenadata.
 OUTPUT_DIR = PROJECT_ROOT / "models" / MODEL_NAME
@@ -57,8 +55,8 @@ IMAGE_SIZE = 64
 NUM_CLASSES = 78
 
 BATCH_SIZE = 64
-EPOCHS = 12
-LEARNING_RATE = 1e-3
+EPOCHS = 20
+LEARNING_RATE = 3e-4
 
 RANDOM_SEED = 42
 
@@ -72,29 +70,39 @@ IMAGE_EXTENSIONS = {
     ".tiff",
 }
 
+INPUT_POLARITY_MODE = "white_ink_on_black__ink_1_background_0"
+
 
 # ============================================================
 # Utilities
 # ============================================================
 
 def seed_everything(seed: int = 42) -> None:
+    """Seed all normal random sources used by this training script."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
 
 def load_json(path: Path) -> dict:
+    """Load a JSON file."""
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def save_json(data, path: Path) -> None:
+    """Save readable JSON."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
 
 
 def ensure_dirs() -> None:
+    """Create model/report output directories."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -142,9 +150,11 @@ def resize_with_padding(image: Image.Image, size: int = 64) -> Image.Image:
     Convert to grayscale, resize while preserving aspect ratio,
     and pad to a square canvas.
 
-    Important:
-    We do NOT directly stretch letters.
-    Stretching would damage Armenian handwriting geometry.
+    Contract:
+      source polarity is white ink on black background.
+
+    If the image is already 64x64, this returns it unchanged after grayscale
+    conversion. That avoids unnecessary interpolation on the Matenadata glyphs.
     """
     image = image.convert("L")
 
@@ -153,6 +163,9 @@ def resize_with_padding(image: Image.Image, size: int = 64) -> Image.Image:
     if width <= 0 or height <= 0:
         raise ValueError("Invalid image with zero width or height")
 
+    if width == size and height == size:
+        return image
+
     scale = min(size / width, size / height)
 
     new_width = max(1, int(width * scale))
@@ -160,8 +173,8 @@ def resize_with_padding(image: Image.Image, size: int = 64) -> Image.Image:
 
     image = image.resize((new_width, new_height), Image.BILINEAR)
 
-    # White background.
-    canvas = Image.new("L", (size, size), color=255)
+    # Black background because source contract is white ink on black.
+    canvas = Image.new("L", (size, size), color=0)
 
     x_offset = (size - new_width) // 2
     y_offset = (size - new_height) // 2
@@ -173,13 +186,20 @@ def resize_with_padding(image: Image.Image, size: int = 64) -> Image.Image:
 
 def threshold_to_binary(image: Image.Image, threshold: int = 128) -> Image.Image:
     """
-    Convert a grayscale glyph to strict black/white pixels.
+    Convert a grayscale white-ink-on-black glyph to strict binary pixels.
 
-    Aristotel and the CNN both behave more consistently when the training
-    samples use the same binary contract as the N05 masks.
+    Contract:
+      - background = black = 0
+      - ink = white = 255
+
+    Matenadata glyphs are white ink on black background, but the ink pixels
+    may not all be equally white. Thresholding normalizes them.
     """
     arr = np.array(image.convert("L"), dtype=np.uint8)
-    binary = np.where(arr < threshold, 0, 255).astype(np.uint8)
+
+    # Bright enough = ink, otherwise background.
+    binary = np.where(arr >= threshold, 255, 0).astype(np.uint8)
+
     return Image.fromarray(binary, mode="L")
 
 
@@ -224,8 +244,12 @@ def apply_aristotel_recipe(
     """
     Apply one Aristotel damage recipe to a binary glyph image.
 
+    Input/output contract:
+      - white ink = 255
+      - black background = 0
+
     Args:
-        image: PIL grayscale glyph, black ink on white background.
+        image: PIL grayscale glyph.
         recipe: DamageRecipe object.
         seed: Deterministic per-sample seed.
 
@@ -240,6 +264,7 @@ def apply_aristotel_recipe(
 
 
 def make_split_report(samples, train_samples, val_samples, test_samples):
+    """Build a compact dataset split report."""
     return {
         "total": len(samples),
         "train": len(train_samples),
@@ -256,6 +281,19 @@ def make_split_report(samples, train_samples, val_samples, test_samples):
 # ============================================================
 
 class GlyphDataset(Dataset):
+    """
+    Dataset for 78-class Armenian glyph classification.
+
+    Source image contract:
+      - white ink on black background
+      - usually already 64x64
+
+    Tensor contract:
+      - ink = 1.0
+      - background = 0.0
+      - shape = [1, 64, 64]
+    """
+
     def __init__(
         self,
         samples,
@@ -298,15 +336,16 @@ class GlyphDataset(Dataset):
                     + recipe_index * 131
                 )
                 image = apply_aristotel_recipe(image, recipe, damage_seed)
+                image = threshold_to_binary(image, self.binary_threshold)
 
             arr = np.array(image).astype(np.float32) / 255.0
 
-            # Invert:
-            # original: white background = 1, black ink = 0
-            # after invert: background = 0, ink = 1
-            arr = 1.0 - arr
-
-            # Shape: [channels, height, width] = [1, 64, 64]
+            # IMPORTANT:
+            # Source glyphs are white ink on black background.
+            # After thresholding:
+            #   ink = 255 -> 1.0
+            #   background = 0 -> 0.0
+            # Therefore: DO NOT INVERT.
             tensor = torch.from_numpy(arr).unsqueeze(0)
 
             label_tensor = torch.tensor(label, dtype=torch.long)
@@ -323,15 +362,12 @@ class GlyphDataset(Dataset):
 
 class GlyphClassifier(nn.Module):
     """
-    Simple v0.1 CNN baseline.
+    Simple CNN baseline.
 
     Goal:
-    - establish first real Armenian glyph classifier baseline
-    - produce top-k candidates
-    - save confusion matrix
-    - identify weak/confused classes
-
-    This is not the final architecture.
+    - Armenian glyph top-k candidate generation
+    - not final N05 decision
+    - not trusted on unsafe/non-character segment crops
     """
 
     def __init__(self, num_classes: int = 78):
@@ -383,6 +419,7 @@ class GlyphClassifier(nn.Module):
 # ============================================================
 
 def train_one_epoch(model, dataloader, optimizer, criterion, device):
+    """Train for one epoch."""
     model.train()
 
     total_loss = 0.0
@@ -393,7 +430,7 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
         images = images.to(device)
         labels = labels.to(device)
 
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
 
         logits = model(images)
         loss = criterion(logits, labels)
@@ -415,6 +452,7 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
 
 
 def evaluate(model, dataloader, criterion, device):
+    """Evaluate model and return loss/top-k metrics plus raw outputs."""
     model.eval()
 
     total_loss = 0.0
@@ -463,7 +501,8 @@ def evaluate(model, dataloader, criterion, device):
 
 def get_top_k_predictions(logits: np.ndarray, k: int = 5):
     """
-    Returns top-k class indexes and probabilities for each sample.
+    Return top-k class indexes and probabilities for each sample.
+
     Used later when N05 needs candidate letters, not only one winner.
     """
     logits_tensor = torch.tensor(logits, dtype=torch.float32)
@@ -476,6 +515,7 @@ def get_top_k_predictions(logits: np.ndarray, k: int = 5):
 
 
 def save_confusion_outputs(y_true, y_pred, label_map):
+    """Save confusion matrix and classification report."""
     cm = confusion_matrix(
         y_true,
         y_pred,
@@ -507,6 +547,7 @@ def save_confusion_outputs(y_true, y_pred, label_map):
 
 
 def save_topk_examples(y_true, y_logits, label_map, k: int = 5, max_examples: int = 300):
+    """Save a small top-k prediction probe report."""
     top_indexes, top_probs = get_top_k_predictions(y_logits, k=k)
 
     examples = []
@@ -537,7 +578,10 @@ def save_topk_examples(y_true, y_logits, label_map, k: int = 5, max_examples: in
     save_json(
         {
             "k": k,
-            "note": "Only a limited sample of top-k examples is saved here. Full top-k candidate export can be added later.",
+            "note": (
+                "Only a limited sample of top-k examples is saved here. "
+                "Full top-k candidate export can be added later."
+            ),
             "examples_saved": len(examples),
             "examples": examples,
         },
@@ -609,6 +653,12 @@ def main():
 
     print("=" * 70)
     print(f"Starting training: {MODEL_NAME}")
+    print("=" * 70)
+    print("Input contract:")
+    print("  Source: white ink on black background")
+    print("  Thresholded: ink=255, background=0")
+    print("  Tensor: ink=1.0, background=0.0")
+    print("  Inversion: disabled")
     print("=" * 70)
 
     if not DATASET_DIR.exists():
@@ -712,11 +762,13 @@ def main():
         seed=RANDOM_SEED,
         binary_threshold=args.binary_threshold,
     )
+
     val_dataset = GlyphDataset(
         val_samples,
         IMAGE_SIZE,
         binary_threshold=args.binary_threshold,
     )
+
     test_dataset = GlyphDataset(
         test_samples,
         IMAGE_SIZE,
@@ -751,11 +803,19 @@ def main():
 
     model = GlyphClassifier(num_classes=NUM_CLASSES).to(device)
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.05)
 
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=LEARNING_RATE,
+        weight_decay=1e-4,
+    )
+
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="max",
+        factor=0.5,
+        patience=2,
     )
 
     best_val_top1 = 0.0
@@ -785,6 +845,10 @@ def main():
             device,
         )
 
+        scheduler.step(val_top1)
+
+        current_lr = optimizer.param_groups[0]["lr"]
+
         row = {
             "epoch": epoch,
             "train_loss": float(train_loss),
@@ -792,6 +856,7 @@ def main():
             "val_loss": float(val_loss),
             "val_top1": float(val_top1),
             "val_top5": float(val_top5),
+            "learning_rate": float(current_lr),
         }
 
         history.append(row)
@@ -802,7 +867,8 @@ def main():
             f"train_top1={train_top1:.4f} | "
             f"val_loss={val_loss:.4f} "
             f"val_top1={val_top1:.4f} "
-            f"val_top5={val_top5:.4f}"
+            f"val_top5={val_top5:.4f} | "
+            f"lr={current_lr:.6f}"
         )
 
         checkpoint = {
@@ -810,7 +876,15 @@ def main():
             "model_state_dict": model.state_dict(),
             "num_classes": NUM_CLASSES,
             "image_size": IMAGE_SIZE,
-            "input_polarity_mode": "normalize_black_ink_on_white",
+            "input_polarity_mode": INPUT_POLARITY_MODE,
+            "tensor_contract": {
+                "source": "white_ink_on_black",
+                "thresholded_ink_value": 255,
+                "thresholded_background_value": 0,
+                "tensor_ink_value": 1.0,
+                "tensor_background_value": 0.0,
+                "invert": False,
+            },
             "binary_threshold": args.binary_threshold,
             "label_map": label_map,
             "epoch": epoch,
@@ -839,7 +913,7 @@ def main():
     checkpoint = torch.load(
         best_model_path,
         map_location=device,
-        weights_only=False
+        weights_only=False,
     )
     model.load_state_dict(checkpoint["model_state_dict"])
 
@@ -872,6 +946,15 @@ def main():
         "learning_rate": LEARNING_RATE,
         "random_seed": RANDOM_SEED,
         "binary_threshold": args.binary_threshold,
+        "input_polarity_mode": INPUT_POLARITY_MODE,
+        "tensor_contract": {
+            "source": "white_ink_on_black",
+            "thresholded_ink_value": 255,
+            "thresholded_background_value": 0,
+            "tensor_ink_value": 1.0,
+            "tensor_background_value": 0.0,
+            "invert": False,
+        },
         "dataset_dir": str(DATASET_DIR),
         "label_map_path": str(LABEL_MAP_PATH),
         "dataset_total_images": len(samples),
@@ -897,10 +980,13 @@ def main():
         "best_model_path": str(best_model_path),
         "last_model_path": str(last_model_path),
         "notes": [
-            "v0.1 baseline model.",
-            "Images are resized with aspect ratio preserved and padded to 64x64.",
+            "White-ink-on-black training contract.",
+            "Images are thresholded to binary: ink=255, background=0.",
+            "Tensor values are ink=1.0, background=0.0.",
+            "No inversion is applied.",
             "Optional Aristotel augmentation is applied only to training samples.",
             "Top-k output is important because N05 needs candidate letters, not only one winner.",
+            "This is still a 78-class classifier; unsafe fragments/multi-character crops need external gating or reject classes later.",
         ],
     }
 

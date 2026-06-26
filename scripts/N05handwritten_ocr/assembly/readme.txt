@@ -117,6 +117,15 @@ the future giant:
    These JSONs are not the final decision matrix yet. They are the evidence
    packets used to inspect which expert is structurally reliable for a segment.
 
+8. Segment-level CNN evidence
+   After assembly materializes the selected path segments, the N05 orchestrator
+   can run the character_detector CNN on each selected segment mask. Results are
+   attached directly to the segment record and mirrored into the expert job
+   queue execution summary.
+
+   The CNN evidence is intentionally segment-level. Whole-unit crops are too
+   wide and can make the model confidently wrong.
+
 Important Boundaries
 --------------------
 This layer DOES:
@@ -136,6 +145,8 @@ This layer DOES:
 - queue future per-segment expert work
 - reserve correctness-history metadata
 - preserve enough paths and artifact links for manual four-expert probes
+- attach selected-segment CNN evidence when the character_detector expert is
+  enabled
 
 This layer DOES NOT:
 
@@ -146,6 +157,7 @@ This layer DOES NOT:
 - replace ScribeTrace, ScriLog, ScriStatistics, CNN, or word OCR
 - learn the final formula yet
 - blindly trust the loudest model confidence
+- treat the CNN top-1 as final truth
 
 Why This Exists
 ---------------

@@ -27,9 +27,19 @@ word_level_ocr_trainer.py:
     from Matenadata glyphs plus the Armenian word-frequency corpus, then trains
     a compact CRNN/CTC recognizer.
 
+scribetrace_word_trainer.py:
+    Tests raw ScribeTrace as a word-level splitter/recognizer. It renders the
+    same synthetic words as word_level_ocr_trainer.py, traces the whole word,
+    exports ScribeTrace feature vectors, and trains simple RandomForest heads
+    for length, token sequence, and boundary-bin prediction.
+
 word_level_ocr_settings.json:
     Owns the synthetic word dataset size, rendering controls, CRNN training
     hyperparameters, and output locations.
+
+scribetrace_word_settings.json:
+    Owns the raw ScribeTrace-word export size, trace settings, boundary-bin
+    target size, and RandomForest baseline settings.
 
 scribetrace_random_forest.py:
     Exports deterministic ScribeTrace geometry vectors from Matenadata and
@@ -157,6 +167,40 @@ Configured training:
     .venv/bin/python -u \
         scripts/Cyber_Lin_Kuei_Assembly/word_level_ocr_trainer.py \
         --mode train
+
+ScribeTrace Word v0.1
+---------------------
+This experiment asks a narrower question than word OCR:
+
+    can raw ScribeTrace word geometry become a better splitter?
+
+It uses the same synthetic word generator, but feeds whole-word ScribeTrace
+vectors into RandomForest heads. Recognition is measured, but boundary F1 is
+the key early score.
+
+Smoke export and training:
+
+    .venv/bin/python -u \
+        scripts/Cyber_Lin_Kuei_Assembly/scribetrace_word_trainer.py \
+        --mode export-train \
+        --limit 80
+
+Larger experiment:
+
+    .venv/bin/python -u \
+        scripts/Cyber_Lin_Kuei_Assembly/scribetrace_word_trainer.py \
+        --mode export-train \
+        --limit 2000
+
+Configured experiment:
+
+    .venv/bin/python -u \
+        scripts/Cyber_Lin_Kuei_Assembly/scribetrace_word_trainer.py \
+        --mode export-train
+
+See:
+
+    scripts/Cyber_Lin_Kuei_Assembly/scribetrace_word_readme.txt
 
 Character CNN + Aristotel
 -------------------------
