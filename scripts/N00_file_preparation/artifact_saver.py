@@ -308,6 +308,20 @@ class ArtifactSaver:
                 folders["masks_dir"]
             )
 
+        if "printed_ocr_ink_mask" in state["images"]:
+            state["artifacts"]["printed_ocr_ink_mask"] = self.save_mask_stage(
+                state["images"]["printed_ocr_ink_mask"],
+                "18_printed_ocr_ink_mask",
+                folders["masks_dir"]
+            )
+
+        if "printed_ocr_tesseract_mask" in state["images"]:
+            state["artifacts"]["printed_ocr_tesseract_mask"] = self.save_mask_stage(
+                state["images"]["printed_ocr_tesseract_mask"],
+                "19_printed_ocr_tesseract_mask",
+                folders["masks_dir"]
+            )
+
 
         if "red_ink_layer" in state["images"]:
             state["artifacts"]["red_ink_layer"] = self.save_stage(

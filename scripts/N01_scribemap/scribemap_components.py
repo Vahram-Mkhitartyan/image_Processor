@@ -24,6 +24,8 @@ def detect_micro_components(content_ink_mask, settings):
     components = []
 
     min_area = settings.get("min_component_area", 15)
+    preserve_small_components = settings.get("preserve_small_components", True)
+    satellite_min_area = settings.get("satellite_min_component_area", 2)
     max_area = settings.get("max_component_area", 999000)
     min_width = settings.get("min_component_width", 1)
     min_height = settings.get("min_component_height", 1)
@@ -37,13 +39,18 @@ def detect_micro_components(content_ink_mask, settings):
         h = stats[label_id, cv2.CC_STAT_HEIGHT]
         area = stats[label_id, cv2.CC_STAT_AREA]
 
-        if area < min_area:
+        is_small_component = area < min_area
+        if is_small_component and (
+            not preserve_small_components or area < satellite_min_area
+        ):
             continue
 
         if w < min_width or h < min_height:
             continue
 
         shape_flags = []
+        if is_small_component:
+            shape_flags.append("small_component_candidate")
 
         if area > max_area:
             shape_flags.append("large_component")

@@ -3,6 +3,7 @@ import cv2
 from scribemap_io import load_image, ensure_output_folders, save_image, save_json
 from scribemap_components import detect_micro_components
 from scribemap_grouping import build_component_groups, filter_line_like_groups
+from scribemap_multiline import split_stacked_groups
 from scribemap_crops import crop_components, crop_groups
 from scribemap_preview import (
     normalize_to_grayscale,
@@ -71,9 +72,14 @@ class ScribeMapBWDetector:
         """
         components = detect_micro_components(content_ink_mask, self.settings)
         raw_groups = build_component_groups(components, self.settings)
+        raw_groups, stacked_split_events = split_stacked_groups(
+            raw_groups,
+            content_ink_mask,
+            self.settings,
+        )
         groups, rejected_groups = filter_line_like_groups(raw_groups, self.settings)
 
-        return components, raw_groups, groups, rejected_groups
+        return components, raw_groups, groups, rejected_groups, stacked_split_events
     
     def _build_groups_for_layer(self, layer_mask, layer_name):
         """Run the normal ScribeMap grouping pipeline on one color layer mask.
@@ -85,7 +91,7 @@ class ScribeMapBWDetector:
         Returns:
             Dictionary with components, raw groups, groups, and rejected groups.
         """
-        components, raw_groups, groups, rejected_groups = self._build_groups_from_content_mask(
+        components, raw_groups, groups, rejected_groups, stacked_split_events = self._build_groups_from_content_mask(
             layer_mask
         )
 
@@ -110,6 +116,8 @@ class ScribeMapBWDetector:
             "raw_group_count": len(raw_groups),
             "group_count": len(groups),
             "rejected_group_count": len(rejected_groups),
+            "stacked_split_count": len(stacked_split_events),
+            "stacked_split_events": stacked_split_events,
             "components": components,
             "raw_groups": raw_groups,
             "groups": groups,
@@ -370,7 +378,7 @@ class ScribeMapBWDetector:
         }
 
         # 4) detect components and build filtered groups
-        components, raw_groups, groups, rejected_groups = self._build_groups_from_content_mask(
+        components, raw_groups, groups, rejected_groups, stacked_split_events = self._build_groups_from_content_mask(
             content_ink_mask
         )
 
@@ -445,6 +453,7 @@ class ScribeMapBWDetector:
             "raw_group_count": len(raw_groups),
             "group_count": len(groups),
             "rejected_group_count": len(rejected_groups),
+            "stacked_split_count": len(stacked_split_events),
 
             "layer_results": layer_results,
             "vertical_debug": vertical_debug or {},
@@ -453,6 +462,7 @@ class ScribeMapBWDetector:
             "raw_groups": raw_groups,
             "groups": groups_output,
             "rejected_groups": rejected_groups,
+            "stacked_split_events": stacked_split_events,
             "artifacts": artifacts,
         }
 

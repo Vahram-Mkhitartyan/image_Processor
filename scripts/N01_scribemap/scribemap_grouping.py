@@ -83,6 +83,63 @@ def is_wide_line_like(component):
     return "wide_line_like" in component.get("shape_flags", [])
 
 
+def is_small_component_candidate(component):
+    """Return True when a component is a tiny satellite candidate."""
+
+    return "small_component_candidate" in component.get("shape_flags", [])
+
+
+def component_box_distance(component_a, component_b):
+    """Return horizontal and vertical bbox gap between two components."""
+
+    horizontal_gap_px = max(
+        0,
+        max(component_a["x1"], component_b["x1"])
+        - min(component_a["x2"], component_b["x2"]),
+    )
+    vertical_gap_px = max(
+        0,
+        max(component_a["y1"], component_b["y1"])
+        - min(component_a["y2"], component_b["y2"]),
+    )
+    return horizontal_gap_px, vertical_gap_px
+
+
+def should_attach_small_component(component_a, component_b, settings):
+    """Attach tiny ink fragments only when a nearby real anchor exists.
+
+    Small Armenian marks, eroded tails, and recovered pixels can be meaningful,
+    but isolated dust should not become its own crop. This rule lets one tiny
+    component attach to a nearby non-tiny anchor while preventing tiny-to-tiny
+    chain merges.
+    """
+
+    small_a = is_small_component_candidate(component_a)
+    small_b = is_small_component_candidate(component_b)
+    if small_a == small_b:
+        return False
+
+    small = component_a if small_a else component_b
+    anchor = component_b if small_a else component_a
+    if is_wide_line_like(anchor):
+        return False
+
+    max_x_gap = settings.get("satellite_attach_max_x_gap", 18)
+    max_y_gap = settings.get("satellite_attach_max_y_gap", 20)
+    max_center_distance = settings.get("satellite_attach_max_center_distance", 34)
+    max_anchor_height_ratio = settings.get("satellite_attach_max_anchor_height_ratio", 9.0)
+
+    gap_x, gap_y = component_box_distance(small, anchor)
+    if gap_x > max_x_gap or gap_y > max_y_gap:
+        return False
+    if center_y_distance(small, anchor) > max_center_distance:
+        return False
+    if height_ratio(small, anchor) > max_anchor_height_ratio:
+        return False
+
+    return True
+
+
 def should_connect_components(component_a, component_b, settings):
     """Pairwise edge decision for graph construction.
     
@@ -110,6 +167,13 @@ def should_connect_components(component_a, component_b, settings):
     if component_b["x1"] < component_a["x1"]:
         # Canonicalize pair order so gap/merge math is consistent.
         component_a, component_b = component_b, component_a
+
+    if settings.get("enable_small_component_attachment", True):
+        if should_attach_small_component(component_a, component_b, settings):
+            return True
+
+    if is_small_component_candidate(component_a) or is_small_component_candidate(component_b):
+        return False
 
     gap = horizontal_gap(component_a, component_b)
     if gap > max_horizontal_gap:
@@ -287,6 +351,10 @@ def build_component_groups(components, settings):
             continue
 
         group_components = [components[index] for index in indexes]
+        satellite_component_count = sum(
+            1 for component in group_components
+            if is_small_component_candidate(component)
+        )
         x1 = min(component["x1"] for component in group_components)
         y1 = min(component["y1"] for component in group_components)
         x2 = max(component["x2"] for component in group_components)
@@ -308,11 +376,14 @@ def build_component_groups(components, settings):
             group_flags.append("vertical_group_line_like")
         if len(group_components) == 1:
             group_flags.append("single_component_group")
+        if satellite_component_count:
+            group_flags.append("has_small_component_satellites")
 
         groups.append({
             "group_id": len(groups) + 1,
             "component_ids": [component["component_id"] for component in group_components],
             "component_count": len(group_components),
+            "satellite_component_count": int(satellite_component_count),
             "x1": int(x1),
             "y1": int(y1),
             "x2": int(x2),

@@ -72,6 +72,35 @@ Core Flow
 5. Save group metadata and document-level previews.
 6. Flatten active layer groups into the neutral N02 bridge contract.
 
+Small Component Satellites
+--------------------------
+N01 keeps very small ink components above satellite_min_component_area as
+small_component_candidate records. They are not allowed to freely group with
+each other. A tiny component can only attach to a nearby non-tiny anchor through
+the satellite attachment rule. This preserves useful Armenian dots, tail
+fragments, and recovered weak pixels while still rejecting isolated dust as a
+tiny_isolated_group.
+
+Groups that absorb these marks expose:
+
+    satellite_component_count
+    has_small_component_satellites
+
+Stacked Group Splitting
+-----------------------
+If two text rows touch, connected components can report them as one object.
+Before final artifact rejection, N01 checks unusually tall groups for a strong
+horizontal low-ink valley. When found, the group is split into top and bottom
+row candidates and the metadata records:
+
+    stacked_split
+    split_parent_group_id
+    split_index
+
+This is a conservative crop-routing repair. It does not try to recognize text;
+it only prevents two stacked words from reaching N02 as one crop when a clear
+row valley exists.
+
 N01 no longer materializes legacy per-group JPEGs during normal pipeline runs.
 N02 owns the canonical full-text crop for every active color-layer group.
 

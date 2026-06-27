@@ -11,6 +11,7 @@ from file_preparation_scribemap_masks import (
     detect_scribemap_line_mask,
     build_grouped_vertical_line_mask,
     create_basic_color_ink_masks,
+    create_printed_ocr_masks,
     isolate_layer_as_image,
 )
 
@@ -116,6 +117,35 @@ def create_initial_state(input_path, output_dir, settings=None):
             "black_ink_max_saturation": settings.get("black_ink_max_saturation", 85),
             "black_ink_max_value": settings.get("black_ink_max_value", 180),
             "black_ink_gray_max": settings.get("black_ink_gray_max", 190),
+
+            "printed_ocr_remove_horizontal_lines": settings.get(
+                "printed_ocr_remove_horizontal_lines",
+                True,
+            ),
+            "printed_ocr_remove_grouped_vertical_lines": settings.get(
+                "printed_ocr_remove_grouped_vertical_lines",
+                True,
+            ),
+            "printed_ocr_remove_vertical_lines": settings.get(
+                "printed_ocr_remove_vertical_lines",
+                False,
+            ),
+            "printed_ocr_min_component_area": settings.get(
+                "printed_ocr_min_component_area",
+                2,
+            ),
+            "printed_ocr_close_kernel_width": settings.get(
+                "printed_ocr_close_kernel_width",
+                2,
+            ),
+            "printed_ocr_close_kernel_height": settings.get(
+                "printed_ocr_close_kernel_height",
+                1,
+            ),
+            "printed_ocr_close_iterations": settings.get(
+                "printed_ocr_close_iterations",
+                1,
+            ),
 
             "horizontal_line_kernel": settings.get("horizontal_line_kernel", SCRIBEMAP_HORIZONTAL_LINE_KERNEL),
             "short_horizontal_line_kernel": settings.get("short_horizontal_line_kernel", SCRIBEMAP_SHORT_HORIZONTAL_LINE_KERNEL),
@@ -416,6 +446,20 @@ def step_create_color_layer_masks(state):
     state["images"]["recovered_red_dark_mask"] = color_masks["recovered_red_dark_mask"]
     state["images"]["recovered_green_dark_mask"] = color_masks["recovered_green_dark_mask"]
 
+    printed_ocr_masks = create_printed_ocr_masks(
+        black_ink_mask=color_masks["black_ink_mask"],
+        combined_horizontal_line_mask=state["images"].get("combined_horizontal_line_mask"),
+        grouped_vertical_line_mask=state["images"].get("grouped_vertical_line_mask"),
+        vertical_line_mask=state["images"].get("vertical_line_mask"),
+        settings=settings,
+    )
+    state["images"]["printed_ocr_ink_mask"] = printed_ocr_masks[
+        "printed_ocr_ink_mask"
+    ]
+    state["images"]["printed_ocr_tesseract_mask"] = printed_ocr_masks[
+        "printed_ocr_tesseract_mask"
+    ]
+
     color_image = image
 
     state["images"]["red_ink_layer"] = isolate_layer_as_image(
@@ -456,6 +500,11 @@ def step_create_color_layer_masks(state):
         "unknown_color_ink_pixels": int((color_masks["unknown_color_ink_mask"] > 0).sum()),
         "colored_ink_pixels": int((color_masks["colored_ink_mask"] > 0).sum()),
         "black_ink_pixels": int((color_masks["black_ink_mask"] > 0).sum()),
+        "printed_ocr_ink_pixels": printed_ocr_masks["printed_ocr_ink_pixels"],
+        "printed_ocr_input_polarity": {
+            "printed_ocr_ink_mask": "white_ink_on_black_background",
+            "printed_ocr_tesseract_mask": "dark_ink_on_white_background",
+        },
         "red_continuity_pixels": int(
             (color_masks["red_continuity_mask"] > 0).sum()
         ),

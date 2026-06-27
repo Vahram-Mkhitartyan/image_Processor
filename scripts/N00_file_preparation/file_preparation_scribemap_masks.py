@@ -211,6 +211,94 @@ def create_cross_color_continuity_masks(red_mask, blue_mask, settings):
     }
 
 
+def _remove_tiny_components(mask, min_area):
+    """Remove connected components smaller than ``min_area`` pixels."""
+
+    min_area = max(int(min_area), 0)
+    if min_area <= 1:
+        return mask.copy()
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (mask > 0).astype(np.uint8),
+        connectivity=8,
+    )
+    cleaned = np.zeros_like(mask, dtype=np.uint8)
+    for label_id in range(1, num_labels):
+        area = int(stats[label_id, cv2.CC_STAT_AREA])
+        if area >= min_area:
+            cleaned[labels == label_id] = 255
+    return cleaned
+
+
+def create_printed_ocr_masks(
+    black_ink_mask,
+    combined_horizontal_line_mask=None,
+    grouped_vertical_line_mask=None,
+    vertical_line_mask=None,
+    settings=None,
+):
+    """Create printed-OCR-friendly binary evidence from exclusive black ink.
+
+    The ScribeMap black layer must stay semantically broad. Printed OCR needs a
+    cleaner source: black printed/dark ink with colored handwriting removed,
+    form lines reduced, tiny specks dropped, and optional small-gap closing.
+
+    Returns:
+        Dictionary with:
+        - printed_ocr_ink_mask: 255 ink on 0 background
+        - printed_ocr_tesseract_mask: 0 ink on 255 background
+    """
+
+    settings = settings or {}
+    printed_ink = np.asarray(black_ink_mask, dtype=np.uint8).copy()
+
+    if settings.get("printed_ocr_remove_horizontal_lines", True):
+        if combined_horizontal_line_mask is not None:
+            printed_ink = cv2.subtract(
+                printed_ink,
+                np.asarray(combined_horizontal_line_mask, dtype=np.uint8),
+            )
+
+    if settings.get("printed_ocr_remove_grouped_vertical_lines", True):
+        if grouped_vertical_line_mask is not None:
+            printed_ink = cv2.subtract(
+                printed_ink,
+                np.asarray(grouped_vertical_line_mask, dtype=np.uint8),
+            )
+    elif settings.get("printed_ocr_remove_vertical_lines", False):
+        if vertical_line_mask is not None:
+            printed_ink = cv2.subtract(
+                printed_ink,
+                np.asarray(vertical_line_mask, dtype=np.uint8),
+            )
+
+    min_area = settings.get("printed_ocr_min_component_area", 2)
+    printed_ink = _remove_tiny_components(printed_ink, min_area)
+
+    close_width = int(settings.get("printed_ocr_close_kernel_width", 2))
+    close_height = int(settings.get("printed_ocr_close_kernel_height", 1))
+    close_iterations = int(settings.get("printed_ocr_close_iterations", 1))
+    if close_width > 0 and close_height > 0 and close_iterations > 0:
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (close_width, close_height),
+        )
+        printed_ink = cv2.morphologyEx(
+            printed_ink,
+            cv2.MORPH_CLOSE,
+            kernel,
+            iterations=close_iterations,
+        )
+
+    printed_ocr_tesseract_mask = cv2.bitwise_not(printed_ink)
+
+    return {
+        "printed_ocr_ink_mask": printed_ink,
+        "printed_ocr_tesseract_mask": printed_ocr_tesseract_mask,
+        "printed_ocr_ink_pixels": int(np.count_nonzero(printed_ink)),
+    }
+
+
 def create_basic_color_ink_masks(image, settings):
     """Create exclusive color ink masks from a BGR color image.
 

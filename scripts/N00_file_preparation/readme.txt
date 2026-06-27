@@ -101,6 +101,21 @@ Important Masks
     15_red_continuity_mask.png
     16_blue_borrowed_bridge_mask.png
     17_red_borrowed_bridge_mask.png
+    18_printed_ocr_ink_mask.png
+    19_printed_ocr_tesseract_mask.png
+
+Printed OCR Masks
+-----------------
+N00 creates a dedicated printed-OCR mask line from the exclusive black ink
+layer. It removes known colored ink ownership, subtracts form-line masks, drops
+tiny specks, and lightly closes small printed-stroke gaps.
+
+    printed_ocr_ink_mask:
+        255 means printed/dark ink evidence, 0 means background.
+
+    printed_ocr_tesseract_mask:
+        0 means printed/dark ink, 255 means background. This polarity is meant
+        for Tesseract-style OCR input.
 
 Color Segmentation
 ------------------

@@ -91,9 +91,13 @@ def build_unclassified_group_record(document_id, group, fallback_layer=None):
 
         "crop_bbox": group.get("crop_bbox"),
         "component_count": group["component_count"],
+        "satellite_component_count": group.get("satellite_component_count", 0),
         "density": group["density"],
         "aspect_ratio": group["aspect_ratio"],
         "group_flags": group["group_flags"],
+        "stacked_split": group.get("stacked_split"),
+        "split_parent_group_id": group.get("split_parent_group_id"),
+        "split_index": group.get("split_index"),
 
         "classification": {
             "label": "unclassified",
@@ -165,6 +169,27 @@ def process_single_document(document_path):
                 # N02 owns the canonical full-text crops. Saving the legacy
                 # content-mask groups here only duplicates unused images.
                 "save_group_crops": False,
+                # Keep tiny ink fragments available as dependent satellites.
+                # Detached dust is still rejected, but nearby Armenian marks
+                # can attach to the real text group instead of disappearing.
+                "preserve_small_components": True,
+                "enable_small_component_attachment": True,
+                "satellite_min_component_area": 2,
+                "satellite_attach_max_x_gap": 18,
+                "satellite_attach_max_y_gap": 20,
+                "satellite_attach_max_center_distance": 34,
+                "satellite_attach_max_anchor_height_ratio": 9.0,
+                # If two text rows touch and become one connected object,
+                # split the suspicious tall group on a strong horizontal
+                # projection valley before N02 receives the crop candidate.
+                "enable_stacked_group_split": True,
+                "stacked_group_min_height_px": 62,
+                "stacked_group_min_width_px": 20,
+                "stacked_group_min_part_height_px": 18,
+                "stacked_group_min_part_ink_px": 20,
+                "stacked_group_projection_smoothing_px": 3,
+                "stacked_group_max_valley_ratio": 0.22,
+                "stacked_group_max_valley_mean_ratio": 0.55,
             }
         )
 
