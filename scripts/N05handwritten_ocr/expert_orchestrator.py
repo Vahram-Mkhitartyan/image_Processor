@@ -6,27 +6,35 @@ import shutil
 
 try:
     from .assembly import build_assembly_map
+    from .assembly.combined_output import build_combined_expert_output
+    from .assembly.decision_matrix import build_decision_matrix
     from .assembly.evidence_fusion import build_assembly_summary
     from .assembly.letter_matrix import build_letter_matrix
     from .assembly.matrix_envelope import build_matrix_envelope
-    from .character_unit_proposer import propose_character_units
     from .character_detector import get_expert_manifest as get_character_manifest
     from .character_detector import recognize as recognize_character_detector
     from .scribetrace import get_expert_manifest as get_scribetrace_manifest
     from .scribetrace import recognize as recognize_scribetrace
+    from .scribetrain_word_segmenter import propose_scribetrain_word_segments
+    from .scrilog import run_scrilog_on_payload
+    from .scribejudge import build_scribejudge_overlay
     from .tesseract_ocr import get_expert_manifest as get_tesseract_manifest
     from .word_level_ocr import get_expert_manifest as get_word_level_manifest
     from .word_level_ocr import recognize as recognize_word_level
 except ImportError:
     from assembly import build_assembly_map
+    from assembly.combined_output import build_combined_expert_output
+    from assembly.decision_matrix import build_decision_matrix
     from assembly.evidence_fusion import build_assembly_summary
     from assembly.letter_matrix import build_letter_matrix
     from assembly.matrix_envelope import build_matrix_envelope
-    from character_unit_proposer import propose_character_units
     from character_detector import get_expert_manifest as get_character_manifest
     from character_detector import recognize as recognize_character_detector
     from scribetrace import get_expert_manifest as get_scribetrace_manifest
     from scribetrace import recognize as recognize_scribetrace
+    from scribetrain_word_segmenter import propose_scribetrain_word_segments
+    from scrilog import run_scrilog_on_payload
+    from scribejudge import build_scribejudge_overlay
     from tesseract_ocr import get_expert_manifest as get_tesseract_manifest
     from word_level_ocr import get_expert_manifest as get_word_level_manifest
     from word_level_ocr import recognize as recognize_word_level
@@ -79,7 +87,7 @@ def load_settings(settings_path=None):
 
 
 def build_expert_registry(settings):
-    """Build the four-expert registry without eagerly loading model weights."""
+    """Build the expert registry without eagerly loading model weights."""
     expert_settings = settings.get("experts", {})
     return {
         "tesseract_ocr": get_tesseract_manifest(
@@ -94,6 +102,17 @@ def build_expert_registry(settings):
         "word_level_ocr": get_word_level_manifest(
             expert_settings.get("word_level_ocr", {})
         ),
+        "scrilog_scrististics": {
+            "expert_name": "scrilog_scrististics",
+            "display_name": "ScriLog + ScriStatistics",
+            "enabled": bool(
+                expert_settings.get("scrilog_scrististics", {}).get("enabled", False)
+            ),
+            "implemented": True,
+            "status": "symbolic_statistical_geometry_ready",
+            "unit_level": "selected_segment",
+            "returns_text": False,
+        },
     }
 
 
@@ -118,17 +137,24 @@ def create_output_folders(output_dir):
         "scribetrace_debug": os.path.join(output_dir, "scribetrace", "debug"),
         "character_unit_proposer": os.path.join(
             output_dir,
+            "legacy",
             "character_unit_proposer",
         ),
         "character_unit_segments": os.path.join(
             output_dir,
+            "legacy",
             "character_unit_proposer",
             "segments",
         ),
         "character_unit_debug": os.path.join(
             output_dir,
+            "legacy",
             "character_unit_proposer",
             "debug",
+        ),
+        "scribetrain_word_segmenter": os.path.join(
+            output_dir,
+            "scribetrain_word_segmenter",
         ),
         "assembly": os.path.join(output_dir, "assembly"),
     }
@@ -175,12 +201,46 @@ def should_send_to_handwritten_ocr(route_record):
     )
 
 
-def select_handwriting_candidates(route_records):
+def get_route_layer(route_record):
+    """Return the semantic ink layer for one upstream route when available."""
+
+    layer = (
+        route_record.get("layer")
+        or route_record.get("classification_layer")
+        or route_record.get("mask_layer")
+    )
+    if layer:
+        return str(layer)
+    visual_source = str(route_record.get("visual_layer_source") or "")
+    if visual_source.endswith("_ink_layer"):
+        return visual_source[: -len("_ink_layer")]
+    mask_source = str(route_record.get("mask_source") or "")
+    if mask_source.endswith("_continuity_mask"):
+        return mask_source[: -len("_continuity_mask")]
+    if mask_source.endswith("_ink_mask"):
+        return mask_source[: -len("_ink_mask")]
+    return None
+
+
+def route_layer_allowed(route_record, settings):
+    """Return whether this route's layer is currently allowed into N05."""
+
+    allowed_layers = settings.get("allowed_layers")
+    if not allowed_layers:
+        return True
+    normalized = {str(layer).lower() for layer in allowed_layers}
+    route_layer = get_route_layer(route_record)
+    return bool(route_layer and route_layer.lower() in normalized)
+
+
+def select_handwriting_candidates(route_records, settings=None):
     """Select N03 handwriting-only and mixed records deterministically."""
+    settings = settings or {}
     return [
         route_record
         for route_record in route_records
         if should_send_to_handwritten_ocr(route_record)
+        and route_layer_allowed(route_record, settings)
     ]
 
 
@@ -565,6 +625,279 @@ def build_character_detector_context(document_id, entry, path, segment, position
     }
 
 
+def build_segment_scribetrace_context(document_id, entry, path, segment, position):
+    """Build context for one selected segment ScribeTrace pass."""
+
+    crop_path = segment.get("mask_crop_path") or segment.get("visual_crop_path")
+    assembly_dir = None
+    if crop_path:
+        # Expected shape: assembly/segments/mask/<file>.png
+        assembly_dir = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(crop_path)))
+        )
+    return {
+        "document_id": document_id,
+        "text_unit_id": (
+            f"{entry.get('text_unit_id')}_"
+            f"{path.get('path_id')}_"
+            f"{segment.get('segment_id')}"
+        ),
+        "group_id": entry.get("group_id"),
+        "source_group_id": entry.get("text_unit_id"),
+        "scribetrace_mask_crop_path": segment.get("mask_crop_path"),
+        "scribetrace_visual_crop_path": segment.get("visual_crop_path"),
+        "scribetrace_output_dir": (
+            os.path.join(assembly_dir, "scribetrace_segments")
+            if assembly_dir
+            else None
+        ),
+        "condition_verdict": (
+            (segment.get("condition") or {}).get("verdict")
+            if isinstance(segment.get("condition"), dict)
+            else None
+        ),
+        "routing_advice": (
+            (segment.get("condition") or {}).get("routing")
+            if isinstance(segment.get("condition"), dict)
+            else None
+        ),
+        "assembly_path_id": path.get("path_id"),
+        "path_type": path.get("path_type") or path.get("type"),
+        "segment_id": segment.get("segment_id"),
+        "segment_position": position,
+        "segment_bbox": segment.get("bbox"),
+        "source": "n05_assembly_selected_segment",
+    }
+
+
+def _selected_segment_records(assembly_map):
+    """Yield selected assembly segments with their parent records."""
+
+    for entry in assembly_map.get("segmentation_matrix") or []:
+        for path in entry.get("paths") or []:
+            if path.get("status") != "selected_for_v0_2_segment_artifacts":
+                continue
+            for position, segment in enumerate(path.get("segments") or []):
+                yield entry, path, segment, position
+
+
+def _find_segment_by_job(assembly_map, job):
+    """Find a segment matching an expert job row."""
+
+    for entry, path, segment, _position in _selected_segment_records(assembly_map):
+        if entry.get("text_unit_id") != job.get("text_unit_id"):
+            continue
+        if path.get("path_id") != job.get("path_id"):
+            continue
+        if segment.get("segment_id") == job.get("segment_id"):
+            return segment
+    return None
+
+
+def _mark_job_executed(assembly_map, expert_name, result_getter):
+    """Mirror segment expert outputs into the queued expert records."""
+
+    for job in assembly_map.get("expert_job_queue") or []:
+        if expert_name not in (job.get("experts_needed") or []):
+            continue
+        segment = _find_segment_by_job(assembly_map, job)
+        if not segment:
+            continue
+        result = result_getter(segment)
+        if not result:
+            continue
+        job.setdefault("executed_experts", {})
+        job["executed_experts"][expert_name] = result
+
+
+def run_scribetrace_scrilog_for_assembly_segments(assembly_map, settings):
+    """Run segment-level ScribeTrace, then ScriLog/ScriStatistics on its payload."""
+
+    expert_settings = settings.get("experts", {})
+    scribetrace_settings = expert_settings.get("scribetrace", {})
+    scrilog_settings = expert_settings.get("scrilog_scrististics", {})
+    scribetrace_enabled = bool(scribetrace_settings.get("enabled", False))
+    scrilog_enabled = bool(scrilog_settings.get("enabled", False))
+    document_id = assembly_map.get("document_id")
+    attempted = 0
+    scribetrace_completed = 0
+    scrilog_completed = 0
+    failed = 0
+
+    if not scribetrace_enabled and not scrilog_enabled:
+        return {
+            "enabled": False,
+            "attempted_segments": 0,
+            "scribetrace_completed_segments": 0,
+            "scrilog_completed_segments": 0,
+            "failed_segments": 0,
+        }
+
+    for entry, path, segment, position in _selected_segment_records(assembly_map):
+        crop_path = segment.get("mask_crop_path") or segment.get("visual_crop_path")
+        if not crop_path:
+            continue
+        attempted += 1
+        segment.setdefault("expert_outputs", {})
+
+        scribetrace_result = None
+        if scribetrace_enabled:
+            scribetrace_result = recognize_scribetrace(
+                crop_path=crop_path,
+                context=build_segment_scribetrace_context(
+                    document_id=document_id,
+                    entry=entry,
+                    path=path,
+                    segment=segment,
+                    position=position,
+                ),
+                settings=scribetrace_settings,
+            )
+            segment["expert_outputs"]["scribetrace"] = scribetrace_result
+            segment["scribetrace"] = {
+                "attempted": bool(scribetrace_result.get("attempted")),
+                "status": scribetrace_result.get("status"),
+                "candidate_count": len(
+                    (
+                        scribetrace_result.get("evidence", {})
+                        .get("rf_letter_candidates_for_unit", [])
+                    )
+                ),
+                "top_candidate": (
+                    (
+                        scribetrace_result.get("evidence", {})
+                        .get("rf_letter_candidates_for_unit", [{}])
+                    )[0].get("char")
+                    if (
+                        scribetrace_result.get("evidence", {})
+                        .get("rf_letter_candidates_for_unit")
+                    )
+                    else None
+                ),
+                "error": scribetrace_result.get("error"),
+            }
+            if scribetrace_result.get("status") in {"completed", "completed_limited"}:
+                scribetrace_completed += 1
+            elif scribetrace_result.get("status") != "disabled":
+                failed += 1
+
+        if scrilog_enabled:
+            scribetrace_payload = (
+                scribetrace_result.get("evidence")
+                if isinstance(scribetrace_result, dict)
+                else None
+            )
+            if not scribetrace_payload:
+                segment["expert_outputs"]["scrilog_scrististics"] = {
+                    "expert_name": "scrilog_scrististics",
+                    "attempted": False,
+                    "status": "skipped",
+                    "evidence": {},
+                    "candidate_effects": [],
+                    "error": "ScribeTrace payload missing for ScriLog.",
+                }
+                continue
+            try:
+                scrilog_result = run_scrilog_on_payload(scribetrace_payload)
+                wrapped_result = {
+                    "expert_name": "scrilog_scrististics",
+                    "attempted": True,
+                    "status": "completed",
+                    "evidence": scrilog_result,
+                    "candidate_effects": scrilog_result.get("candidate_effects", []),
+                    "boosted_candidates": scrilog_result.get("boosted_candidates", []),
+                    "blocked_candidates": scrilog_result.get("blocked_candidates", []),
+                    "weakened_candidates": scrilog_result.get("weakened_candidates", []),
+                    "error": None,
+                }
+                scrilog_completed += 1
+            except Exception as error:
+                wrapped_result = {
+                    "expert_name": "scrilog_scrististics",
+                    "attempted": True,
+                    "status": "failed",
+                    "evidence": {},
+                    "candidate_effects": [],
+                    "error": str(error),
+                }
+                failed += 1
+            segment["expert_outputs"]["scrilog_scrististics"] = wrapped_result
+            segment["scrilog_scrististics"] = {
+                "attempted": bool(wrapped_result.get("attempted")),
+                "status": wrapped_result.get("status"),
+                "candidate_effect_count": len(wrapped_result.get("candidate_effects") or []),
+                "boosted_candidate_count": len(wrapped_result.get("boosted_candidates") or []),
+                "error": wrapped_result.get("error"),
+            }
+
+    _mark_job_executed(
+        assembly_map,
+        "scribetrace",
+        lambda segment: {
+            "status": segment.get("expert_outputs", {}).get("scribetrace", {}).get("status"),
+            "candidate_count": len(
+                segment.get("expert_outputs", {})
+                .get("scribetrace", {})
+                .get("evidence", {})
+                .get("rf_letter_candidates_for_unit", [])
+            ),
+            "top_candidate": (
+                (
+                    segment.get("expert_outputs", {})
+                    .get("scribetrace", {})
+                    .get("evidence", {})
+                    .get("rf_letter_candidates_for_unit", [{}])
+                )[0].get("char")
+                if segment.get("expert_outputs", {})
+                .get("scribetrace", {})
+                .get("evidence", {})
+                .get("rf_letter_candidates_for_unit")
+                else None
+            ),
+        },
+    )
+    _mark_job_executed(
+        assembly_map,
+        "scrilog",
+        lambda segment: {
+            "status": segment.get("expert_outputs", {})
+            .get("scrilog_scrististics", {})
+            .get("status"),
+            "candidate_effect_count": len(
+                segment.get("expert_outputs", {})
+                .get("scrilog_scrististics", {})
+                .get("candidate_effects", [])
+            ),
+        },
+    )
+    _mark_job_executed(
+        assembly_map,
+        "scrististics",
+        lambda segment: {
+            "status": segment.get("expert_outputs", {})
+            .get("scrilog_scrististics", {})
+            .get("status"),
+            "statistical_evidence_available": bool(
+                segment.get("expert_outputs", {})
+                .get("scrilog_scrististics", {})
+                .get("evidence", {})
+                .get("statistical_evidence")
+            ),
+        },
+    )
+
+    summary = {
+        "enabled": True,
+        "attempted_segments": attempted,
+        "scribetrace_completed_segments": scribetrace_completed,
+        "scrilog_completed_segments": scrilog_completed,
+        "failed_segments": failed,
+    }
+    assembly_map.setdefault("summary", {})
+    assembly_map["summary"]["scribetrace_scrilog_segments"] = summary
+    return summary
+
+
 def run_character_detector_for_assembly_segments(assembly_map, settings):
     """Run the pixel CNN on selected N05 assembly segment masks.
 
@@ -725,6 +1058,12 @@ def rebuild_assembly_matrices_after_segment_experts(
 
     assembly_settings = settings.get("assembly", {})
     letter_settings = assembly_settings.get("letter_matrix", {})
+    combined_settings = assembly_settings.get("combined_output", {})
+    decision_settings = assembly_settings.get("decision_matrix", {})
+    scribejudge_settings = assembly_settings.get(
+        "scribejudge",
+        settings.get("scribejudge", {}),
+    )
     segmentation_matrix = assembly_map.get("segmentation_matrix") or []
 
     previous_executed_jobs = _index_executed_job_records(
@@ -752,6 +1091,41 @@ def rebuild_assembly_matrices_after_segment_experts(
 
     assembly_map["letter_matrix"] = letter_matrix
     assembly_map.update(envelope)
+    assembly_map["combined_expert_output"] = build_combined_expert_output(
+        assembly_map=assembly_map,
+        settings=combined_settings,
+    )
+    assembly_map.setdefault("matrices", {})["combined_output"] = {
+        "version": assembly_map["combined_expert_output"].get("version"),
+        "status": assembly_map["combined_expert_output"].get("status"),
+        "inputs": ["letter_evidence"],
+        "outputs": ["n06_word_tokens", "position_candidate_backups"],
+        "rows": assembly_map["combined_expert_output"].get("word_tokens", []),
+    }
+    assembly_map["decision_matrix"] = build_decision_matrix(
+        combined_expert_output=assembly_map["combined_expert_output"],
+        settings=decision_settings,
+    )
+    assembly_map.setdefault("matrices", {})["decision"] = {
+        "version": assembly_map["decision_matrix"].get("version"),
+        "status": assembly_map["decision_matrix"].get("status"),
+        "inputs": ["combined_output"],
+        "outputs": ["provisional_word_candidates"],
+        "rows": assembly_map["decision_matrix"].get("rows", []),
+    }
+    project_root = os.path.dirname(os.path.dirname(MODULE_DIR))
+    assembly_map["scribejudge_overlay"] = build_scribejudge_overlay(
+        assembly_map=assembly_map,
+        settings=scribejudge_settings,
+        base_dir=project_root,
+    )
+    assembly_map.setdefault("matrices", {})["scribejudge"] = {
+        "version": assembly_map["scribejudge_overlay"].get("version"),
+        "status": assembly_map["scribejudge_overlay"].get("status"),
+        "inputs": ["decision_matrix", "combined_output", "confusion_history"],
+        "outputs": ["advisory_risk_overlay", "future_meta_model_features"],
+        "rows": assembly_map["scribejudge_overlay"].get("rows", []),
+    }
 
     rebuilt_summary = build_assembly_summary(
         assembly_map.get("segmentation_matrix") or [],
@@ -759,6 +1133,15 @@ def rebuild_assembly_matrices_after_segment_experts(
         matrices=assembly_map.get("matrices", {}),
         expert_job_queue=assembly_map.get("expert_job_queue", []),
     )
+    rebuilt_summary["combined_output"] = assembly_map[
+        "combined_expert_output"
+    ].get("summary", {})
+    rebuilt_summary["decision_matrix"] = assembly_map[
+        "decision_matrix"
+    ].get("summary", {})
+    rebuilt_summary["scribejudge_overlay"] = assembly_map[
+        "scribejudge_overlay"
+    ].get("summary", {})
 
     # Preserve runtime summaries already written by segment expert runners.
     for key, value in previous_summary.items():
@@ -895,7 +1278,10 @@ def build_handwriting_expert_map(
 
     document_id = visual_routes_payload.get("document_id", "unknown_document")
     route_records = visual_routes_payload.get("routes", [])
-    selected_routes = select_handwriting_candidates(route_records)
+    selected_routes = select_handwriting_candidates(
+        route_records,
+        settings=settings.get("input_filter", {}),
+    )
     handwritten_text_units = []
     skipped_records = []
     failed_records = []
@@ -929,16 +1315,6 @@ def build_handwriting_expert_map(
                 document_id=document_id,
             )
 
-            # Universal pre-expert proposal. Experts continue to receive the
-            # original whole-unit crop until hypothesis routing is implemented.
-            handwritten_text_unit["character_unit_proposal"] = (
-                propose_character_units(
-                    handwritten_text_unit=handwritten_text_unit,
-                    folders=folders,
-                    settings=settings.get("character_unit_proposer", {}),
-                )
-            )
-
             word_level_result = run_word_level_ocr_for_text_unit(
                 handwritten_text_unit=handwritten_text_unit,
                 settings=settings,
@@ -947,6 +1323,19 @@ def build_handwriting_expert_map(
                 handwritten_text_unit=handwritten_text_unit,
                 word_level_result=word_level_result,
             )
+
+            handwritten_text_unit["scribetrain_word_segmentation"] = (
+                propose_scribetrain_word_segments(
+                    handwritten_text_unit=handwritten_text_unit,
+                    settings=settings.get("scribetrain_word_segmenter", {}),
+                )
+            )
+            handwritten_text_unit["character_unit_proposal"] = {
+                "schema_version": "n05_character_unit_proposal_legacy_v1",
+                "status": "legacy_disabled",
+                "active": False,
+                "reason": "Replaced by scribetrain_word_segmenter as the primary splitter.",
+            }
 
             scribetrace_result = run_scribetrace_for_text_unit(
                 handwritten_text_unit=handwritten_text_unit,
@@ -981,6 +1370,10 @@ def build_handwriting_expert_map(
         settings=settings.get("assembly", {}),
         output_dir=folders["assembly"],
     )
+    scribetrace_scrilog_segment_summary = run_scribetrace_scrilog_for_assembly_segments(
+        assembly_map=assembly_map,
+        settings=settings,
+    )
     character_detector_segment_summary = run_character_detector_for_assembly_segments(
         assembly_map=assembly_map,
         settings=settings,
@@ -1007,6 +1400,7 @@ def build_handwriting_expert_map(
         "coordinate_space": "original_document_image",
         "expert_registry": build_expert_registry(settings),
         "summary": summary,
+        "scribetrace_scrilog_segment_summary": scribetrace_scrilog_segment_summary,
         "character_detector_segment_summary": character_detector_segment_summary,
         "assembly": assembly_map,
         "assembly_path": assembly_path,
@@ -1032,5 +1426,6 @@ __all__ = [
     "create_output_folders",
     "rebuild_assembly_matrices_after_segment_experts",
     "run_character_detector_for_assembly_segments",
+    "run_scribetrace_scrilog_for_assembly_segments",
     "run_scribetrace_for_text_unit",
 ]

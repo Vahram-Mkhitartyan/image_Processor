@@ -259,6 +259,12 @@
               data-stage="n05"
               data-query="_visual.png"
             >LETTERS</button>
+            <button
+              class="stage-tab"
+              data-stage="n05"
+              data-query="assembly"
+              data-decision-canvas="true"
+            >DECISION</button>
           </div>
 
           <div class="trace-layout">
@@ -310,6 +316,46 @@
               <div id="contact-sheet" class="contact-sheet"></div>
             </div>
           </div>
+
+          <section class="decision-canvas-panel printed-context-panel">
+            <div class="decision-canvas-header">
+              <div>
+                <p class="eyebrow">N04 PRINTED CONTEXT CANVAS</p>
+                <h2>Printed OCR evidence over the document</h2>
+              </div>
+              <div class="decision-canvas-actions">
+                <span id="printed-context-summary">Waiting for N04 output</span>
+                <button id="refresh-printed-context" class="icon-button" type="button" title="Refresh printed context canvas">↻</button>
+              </div>
+            </div>
+            <div id="printed-context-empty" class="decision-canvas-empty">
+              Run N04, then refresh this canvas to see printed OCR context tokens placed by bbox.
+            </div>
+            <div id="printed-context-frame" class="decision-canvas-frame printed-context-frame">
+              <img id="printed-context-image" alt="Original document with N04 printed OCR context overlay">
+              <div id="printed-context-overlay" class="decision-canvas-overlay"></div>
+            </div>
+          </section>
+
+          <section class="decision-canvas-panel">
+            <div class="decision-canvas-header">
+              <div>
+                <p class="eyebrow">N05 DECISION CANVAS</p>
+                <h2>Text ghosted back onto the document</h2>
+              </div>
+              <div class="decision-canvas-actions">
+                <span id="decision-canvas-summary">Waiting for N05 output</span>
+                <button id="refresh-decision-canvas" class="icon-button" type="button" title="Refresh decision canvas">↻</button>
+              </div>
+            </div>
+            <div id="decision-canvas-empty" class="decision-canvas-empty">
+              Run N05, then refresh this canvas to see provisional OCR text placed by bbox.
+            </div>
+            <div id="decision-canvas-frame" class="decision-canvas-frame">
+              <img id="decision-canvas-image" alt="Original document with N05 decision text overlay">
+              <div id="decision-canvas-overlay" class="decision-canvas-overlay"></div>
+            </div>
+          </section>
         </section>
 
       </section>
@@ -506,6 +552,17 @@
       </section>
     </section>
   </main>
+
+  <nav class="elevator-controls" aria-label="Fast page navigation">
+    <button id="elevator-up" class="elevator-button" type="button" title="Fast scroll to top">
+      <span>UP</span>
+      <strong>↑</strong>
+    </button>
+    <button id="elevator-down" class="elevator-button" type="button" title="Fast scroll to bottom">
+      <span>DOWN</span>
+      <strong>↓</strong>
+    </button>
+  </nav>
 
   <div id="toast" class="toast" role="status"></div>
   <section id="sample-detail" class="sample-detail" aria-hidden="true">

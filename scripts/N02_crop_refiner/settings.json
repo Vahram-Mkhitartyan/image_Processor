@@ -21,7 +21,7 @@
   "border_profile_min_overlap_ratio": 0.2,
   "crop_padding_px": 2,
   "debug_preview_enabled": true,
-  "correction_routing_enabled": true,
+  "correction_routing_enabled": false,
   "correction_min_crossing_ink_pixels": 6,
   "correction_min_horizontal_span_ratio": 0.35,
   "correction_min_vertical_span_ratio": 0.45,

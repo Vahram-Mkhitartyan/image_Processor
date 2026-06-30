@@ -3,6 +3,8 @@ import argparse
 import json
 import random
 import shutil
+import sys
+import time
 from collections import Counter
 
 import numpy as np
@@ -263,6 +265,47 @@ def apply_aristotel_recipe(
     return Image.fromarray(damaged, mode="L")
 
 
+def render_progress_bar(
+    label: str,
+    current: int,
+    total: int,
+    started_at: float,
+    loss: float | None = None,
+    items_done: int | None = None,
+    items_total: int | None = None,
+    item_label: str = "img",
+    width: int = 28,
+) -> None:
+    """Render one compact in-place terminal progress bar."""
+
+    safe_total = max(1, int(total))
+    safe_current = max(0, min(int(current), safe_total))
+    ratio = safe_current / safe_total
+    filled = int(round(width * ratio))
+    bar = "#" * filled + "-" * (width - filled)
+    elapsed = max(0.0, time.time() - started_at)
+    eta = elapsed * (safe_total - safe_current) / safe_current if safe_current else 0.0
+    loss_text = f" loss={loss:.4f}" if loss is not None else ""
+    item_text = ""
+    if items_done is not None and items_total is not None:
+        safe_items_done = max(0, int(items_done))
+        safe_items_total = max(1, int(items_total))
+        item_rate = safe_items_done / elapsed if elapsed > 0 else 0.0
+        item_text = (
+            f" {safe_items_done:>6}/{safe_items_total:<6} {item_label}"
+            f" {item_rate:6.1f} {item_label}/s"
+        )
+    sys.stdout.write(
+        f"\r{label} [{bar}] {safe_current:>4}/{safe_total:<4} "
+        f"{ratio * 100:6.2f}% elapsed={elapsed:6.1f}s eta={eta:6.1f}s"
+        f"{item_text}{loss_text}"
+    )
+    sys.stdout.flush()
+    if safe_current >= safe_total:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+
 def make_split_report(samples, train_samples, val_samples, test_samples):
     """Build a compact dataset split report."""
     return {
@@ -418,15 +461,18 @@ class GlyphClassifier(nn.Module):
 # Train / Eval
 # ============================================================
 
-def train_one_epoch(model, dataloader, optimizer, criterion, device):
+def train_one_epoch(model, dataloader, optimizer, criterion, device, epoch=None):
     """Train for one epoch."""
     model.train()
 
     total_loss = 0.0
     all_predictions = []
     all_labels = []
+    started_at = time.time()
+    progress_label = f"train e{int(epoch):02d}" if epoch is not None else "train"
+    progress_every = max(1, len(dataloader) // 50)
 
-    for images, labels in dataloader:
+    for batch_index, (images, labels) in enumerate(dataloader, start=1):
         images = images.to(device)
         labels = labels.to(device)
 
@@ -445,13 +491,29 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
         all_predictions.extend(predictions.detach().cpu().numpy())
         all_labels.extend(labels.detach().cpu().numpy())
 
+        if (
+            batch_index == 1
+            or batch_index == len(dataloader)
+            or batch_index % progress_every == 0
+        ):
+            seen = min(len(dataloader.dataset), batch_index * dataloader.batch_size)
+            render_progress_bar(
+                progress_label,
+                batch_index,
+                len(dataloader),
+                started_at,
+                loss=total_loss / max(1, seen),
+                items_done=seen,
+                items_total=len(dataloader.dataset),
+            )
+
     average_loss = total_loss / len(dataloader.dataset)
     top1_accuracy = accuracy_score(all_labels, all_predictions)
 
     return average_loss, top1_accuracy
 
 
-def evaluate(model, dataloader, criterion, device):
+def evaluate(model, dataloader, criterion, device, label="eval"):
     """Evaluate model and return loss/top-k metrics plus raw outputs."""
     model.eval()
 
@@ -459,9 +521,11 @@ def evaluate(model, dataloader, criterion, device):
     all_logits = []
     all_predictions = []
     all_labels = []
+    started_at = time.time()
+    progress_every = max(1, len(dataloader) // 50)
 
     with torch.no_grad():
-        for images, labels in dataloader:
+        for batch_index, (images, labels) in enumerate(dataloader, start=1):
             images = images.to(device)
             labels = labels.to(device)
 
@@ -475,6 +539,22 @@ def evaluate(model, dataloader, criterion, device):
             all_logits.append(logits.detach().cpu().numpy())
             all_predictions.extend(predictions.detach().cpu().numpy())
             all_labels.extend(labels.detach().cpu().numpy())
+
+            if (
+                batch_index == 1
+                or batch_index == len(dataloader)
+                or batch_index % progress_every == 0
+            ):
+                seen = min(len(dataloader.dataset), batch_index * dataloader.batch_size)
+                render_progress_bar(
+                    label,
+                    batch_index,
+                    len(dataloader),
+                    started_at,
+                    loss=total_loss / max(1, seen),
+                    items_done=seen,
+                    items_total=len(dataloader.dataset),
+                )
 
     all_logits = np.concatenate(all_logits, axis=0)
 
@@ -836,6 +916,7 @@ def main():
             optimizer,
             criterion,
             device,
+            epoch=epoch,
         )
 
         val_loss, val_top1, val_top5, _, _, _ = evaluate(
@@ -843,6 +924,7 @@ def main():
             val_loader,
             criterion,
             device,
+            label=f"val   e{epoch:02d}",
         )
 
         scheduler.step(val_top1)
@@ -929,6 +1011,7 @@ def main():
         test_loader,
         criterion,
         device,
+        label="test",
     )
 
     save_confusion_outputs(y_true, y_pred, label_map)

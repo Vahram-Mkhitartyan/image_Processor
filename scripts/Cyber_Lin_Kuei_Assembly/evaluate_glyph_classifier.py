@@ -31,7 +31,7 @@ LABEL_MAP_PATH = (
     / "numeric_label_map.json"
 )
 
-MODEL_NAME = "glyph_classifier_v0_1"
+MODEL_NAME = "glyph_classifier_v0_3_white_ink"
 
 MODEL_PATH = PROJECT_ROOT / "models" / MODEL_NAME / f"{MODEL_NAME}_best.pt"
 REPORT_DIR = PROJECT_ROOT / "reports" / MODEL_NAME
@@ -82,6 +82,8 @@ def collect_samples(dataset_dir: Path):
 
 
 def resize_with_padding(image: Image.Image, size: int = 64) -> Image.Image:
+    """Resize a white-ink-on-black glyph while preserving black padding."""
+
     image = image.convert("L")
 
     width, height = image.size
@@ -93,7 +95,7 @@ def resize_with_padding(image: Image.Image, size: int = 64) -> Image.Image:
 
     image = image.resize((new_width, new_height), Image.BILINEAR)
 
-    canvas = Image.new("L", (size, size), color=255)
+    canvas = Image.new("L", (size, size), color=0)
 
     x_offset = (size - new_width) // 2
     y_offset = (size - new_height) // 2
@@ -103,10 +105,19 @@ def resize_with_padding(image: Image.Image, size: int = 64) -> Image.Image:
     return canvas
 
 
+def threshold_to_binary(image: Image.Image, threshold: int = 128) -> Image.Image:
+    """Convert white ink to 255 and black background to 0."""
+
+    arr = np.array(image.convert("L"), dtype=np.uint8)
+    binary = np.where(arr >= threshold, 255, 0).astype(np.uint8)
+    return Image.fromarray(binary, mode="L")
+
+
 class GlyphDataset(Dataset):
-    def __init__(self, samples, image_size: int = 64):
+    def __init__(self, samples, image_size: int = 64, binary_threshold: int = 128):
         self.samples = samples
         self.image_size = image_size
+        self.binary_threshold = int(binary_threshold)
 
     def __len__(self):
         return len(self.samples)
@@ -116,11 +127,11 @@ class GlyphDataset(Dataset):
 
         image = Image.open(path)
         image = resize_with_padding(image, self.image_size)
+        image = threshold_to_binary(image, self.binary_threshold)
 
         arr = np.array(image).astype(np.float32) / 255.0
 
-        # background = 0, ink = 1
-        arr = 1.0 - arr
+        # Current glyph trainer contract: white ink = 1, black background = 0.
 
         tensor = torch.from_numpy(arr).unsqueeze(0)
         label_tensor = torch.tensor(label, dtype=torch.long)

@@ -296,10 +296,20 @@ def _effect_lists_from_output(output: dict) -> list[dict]:
     return effects
 
 
-def _segment_scrististics_effect_candidates(segment: dict, settings: dict) -> list[dict]:
-    """Convert positive ScriStistics effects into low-weight soft candidates."""
+def _segment_scrististics_effect_candidates(
+    segment: dict,
+    settings: dict,
+    allowed_chars: set[str] | None = None,
+) -> list[dict]:
+    """Convert positive ScriStistics effects into low-weight support signals.
+
+    ScriStatistics is a geometry prior, not a classifier. It should strengthen
+    candidates already proposed by real recognizers, but it must not invent a
+    frequent-looking Armenian letter for every weak crop.
+    """
 
     source_weight = _safe_float(settings.get("scrististics_effect_weight", 0.12), 0.12)
+    allow_new = bool(settings.get("allow_scrististics_new_candidates", False))
     candidates = []
     for output in _candidate_effect_outputs(segment):
         for index, effect in enumerate(_effect_lists_from_output(output), start=1):
@@ -307,6 +317,8 @@ def _segment_scrististics_effect_candidates(segment: dict, settings: dict) -> li
                 continue
             char = _candidate_char(effect)
             if not char:
+                continue
+            if not allow_new and (not allowed_chars or char not in allowed_chars):
                 continue
             strength = _safe_float(effect.get("strength"), 0.0)
             candidates.append(
@@ -319,7 +331,7 @@ def _segment_scrististics_effect_candidates(segment: dict, settings: dict) -> li
                     evidence={
                         "raw_effect": effect,
                         "source_weight": source_weight,
-                        "note": "soft_support_not_direct_classifier",
+                        "note": "soft_support_for_existing_candidate_only",
                     },
                 )
             )
@@ -392,8 +404,22 @@ def _dedupe_candidates(candidates: list[dict], top_k: int) -> list[dict]:
         )
     return sorted(
         merged,
-        key=lambda item: (-_safe_float(item.get("score"), 0.0), str(item.get("char", ""))),
+        key=lambda item: (
+            -_rank_ready_candidate_score(item),
+            str(item.get("char", "")),
+        ),
     )[:top_k]
+
+
+def _rank_ready_candidate_score(candidate: dict) -> float:
+    """Return a sort score that prefers source agreement over lone confidence."""
+
+    evidence = candidate.get("evidence") if isinstance(candidate.get("evidence"), dict) else {}
+    source_scores = evidence.get("source_scores") if isinstance(evidence.get("source_scores"), dict) else {}
+    source_count = sum(1 for score in source_scores.values() if _safe_float(score) > 0.0)
+    agreement_bonus = min(0.18, max(0, source_count - 1) * 0.06)
+    single_source_penalty = 0.20 if source_count <= 1 else 0.0
+    return _safe_float(candidate.get("score"), 0.0) + agreement_bonus - single_source_penalty
 
 
 def _top_raw_char(candidates: list[dict], source_prefix: str) -> str | None:
@@ -500,7 +526,18 @@ def _candidates_for_segment(
     if isinstance(segment, dict):
         segment_candidates.extend(_segment_scribetrace_candidates(segment, settings))
         segment_candidates.extend(_segment_character_detector_candidates(segment, settings))
-        segment_candidates.extend(_segment_scrististics_effect_candidates(segment, settings))
+        allowed_chars = {
+            str(candidate.get("char"))
+            for candidate in [*candidates, *segment_candidates]
+            if candidate.get("char")
+        }
+        segment_candidates.extend(
+            _segment_scrististics_effect_candidates(
+                segment,
+                settings,
+                allowed_chars=allowed_chars,
+            )
+        )
 
     candidates.extend(segment_candidates)
 

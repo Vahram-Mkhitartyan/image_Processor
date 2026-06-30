@@ -85,10 +85,15 @@ def build_document_bbox(route_record):
     Build a clean document-level bounding box.
 
     Color Update rule:
-    Prefer final_bbox because N02 may expand/sanitize the original bbox.
-    Fall back to bbox only if final_bbox is missing.
+    Prefer the N04 black-mask-derived bbox when present. It is generated from
+    full-document black ink and reflected onto the printed OCR mask.
+    Fall back to final_bbox, then bbox.
     """
-    bbox = route_record.get("final_bbox") or route_record.get("bbox")
+    bbox = (
+        route_record.get("black_mask_derived_bbox")
+        or route_record.get("final_bbox")
+        or route_record.get("bbox")
+    )
 
     if bbox is None:
         return None
@@ -136,28 +141,25 @@ def build_crop_bbox(route_record):
     }
 
 
-def get_best_crop_path_for_printed_ocr(route_record):
-    """
-    Pick the crop path N04 should use for printed OCR.
+def _black_mask_preferred_for_printed_ocr(route_record):
+    """Return True when N04 should OCR the exact black binary mask crop."""
 
-    Color Update priority:
-    1. classification_crop_path
-       - N02 target-layer-only crop on white background.
-       - Best direct input for OCR.
+    return (
+        route_record.get("layer") == "black"
+        and route_record.get("analysis_mask_crop_path")
+        and route_record.get("mask_source") == "black_ink_mask"
+    )
 
-    2. routed_crop_path
-       - N03 copy of the same crop inside classified folders.
-       - Good debug fallback.
 
-    3. analysis_crop_path
-       - Usually same visual content as classification crop.
+def get_best_crop_source_for_printed_ocr(route_record):
+    """Return the route-record field selected as N04 OCR input."""
 
-    4. refined_crop_path
-       - Backward compatibility.
+    if route_record.get("black_mask_reflected_ocr_crop_path"):
+        return "black_mask_reflected_ocr_crop_path"
 
-    5. original/source crop fallbacks.
-       - These may contain extra layers and should not be preferred.
-    """
+    if _black_mask_preferred_for_printed_ocr(route_record):
+        return "analysis_mask_crop_path"
+
     crop_keys = [
         "classification_crop_path",
         "routed_crop_path",
@@ -168,9 +170,40 @@ def get_best_crop_path_for_printed_ocr(route_record):
     ]
 
     for key in crop_keys:
-        crop_path = route_record.get(key)
-
-        if crop_path:
-            return crop_path
+        if route_record.get(key):
+            return key
 
     return None
+
+
+def get_best_crop_path_for_printed_ocr(route_record):
+    """
+    Pick the crop path N04 should use for printed OCR.
+
+    Black printed context priority:
+    1. analysis_mask_crop_path for black-layer routes
+       - Exact binary black ink mask from N02.
+       - Prevents colored/handwritten context from leaking into printed OCR.
+
+    Color Update fallback priority:
+    2. classification_crop_path
+       - N02 target-layer-only crop on white background.
+       - Best direct input for OCR.
+
+    3. routed_crop_path
+       - N03 copy of the same crop inside classified folders.
+       - Good debug fallback.
+
+    4. analysis_crop_path
+       - Usually same visual content as classification crop.
+
+    5. refined_crop_path
+       - Backward compatibility.
+
+    6. original/source crop fallbacks.
+       - These may contain extra layers and should not be preferred.
+    """
+    crop_source = get_best_crop_source_for_printed_ocr(route_record)
+    if crop_source is None:
+        return None
+    return route_record.get(crop_source)

@@ -331,10 +331,21 @@ def step_deskew_image(state):
         state["images"]["color_deskewed"] = color_deskewed
         state["images"]["color_current"] = color_deskewed
 
+    if "denoised" in state["images"]:
+        denoised_deskewed = preprocessor.rotate_by_angle(
+            state["images"]["denoised"],
+            angle,
+        )
+        state["images"]["denoised_deskewed"] = denoised_deskewed
+
     state["data"]["detected_skew_angle"] = angle
 
     state["metadata"]["steps_completed"].append("deskew_image")
     state["metadata"]["shapes"]["deskewed"] = list(deskewed.shape)
+    if "denoised_deskewed" in state["images"]:
+        state["metadata"]["shapes"]["denoised_deskewed"] = list(
+            state["images"]["denoised_deskewed"].shape
+        )
     state["metadata"]["quality"]["detected_skew_angle"] = round(angle, 2)
 
     return state
@@ -367,8 +378,22 @@ def step_crop_white_margins(state):
             state["images"]["color_cropped"] = color_cropped
             state["images"]["color_current"] = color_cropped
 
+    if "denoised_deskewed" in state["images"]:
+        denoised_deskewed = state["images"]["denoised_deskewed"]
+
+        if denoised_deskewed.shape[:2] == image.shape[:2]:
+            denoised_cropped = preprocessor.crop_to_bounds(
+                denoised_deskewed,
+                crop_bounds,
+            )
+            state["images"]["denoised_deskewed_cropped"] = denoised_cropped
+
     state["metadata"]["steps_completed"].append("crop_white_margins")
     state["metadata"]["shapes"]["cropped"] = list(cropped.shape)
+    if "denoised_deskewed_cropped" in state["images"]:
+        state["metadata"]["shapes"]["denoised_deskewed_cropped"] = list(
+            state["images"]["denoised_deskewed_cropped"].shape
+        )
     state["metadata"]["crop_bounds"] = {
         "x1": int(crop_bounds[0]),
         "y1": int(crop_bounds[1]),

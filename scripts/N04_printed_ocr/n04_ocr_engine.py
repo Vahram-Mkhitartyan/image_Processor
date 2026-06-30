@@ -20,7 +20,7 @@ def run_tesseract_command(
     Run Tesseract on one prepared crop and return raw OCR text.
 
     Command:
-        tesseract crop.png stdout -l hye --psm 7
+        tesseract crop.png stdout -l hye --psm 3
     """
     check_file_exists(
         crop_path,
@@ -89,8 +89,8 @@ def build_single_ocr_candidate(crop_path, config):
     Run one OCR candidate configuration.
 
     Example configs:
-        hye-calfa-n + psm 6
-        hye + psm 6
+        hye-calfa-n + psm 3
+        hye + psm 3
     """
     language = config["language"]
     psm = config["psm"]

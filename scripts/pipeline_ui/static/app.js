@@ -32,6 +32,8 @@ const state = {
   detailDragging: false,
   detailDragX: 0,
   detailDragY: 0,
+  decisionCanvas: null,
+  printedContextCanvas: null,
 };
 
 const elements = {
@@ -51,8 +53,15 @@ const elements = {
   cropContextMeta: document.querySelector("#crop-context-meta"),
   cropContextPanel: document.querySelector("#crop-context-panel"),
   cropContextTitle: document.querySelector("#crop-context-title"),
+  decisionCanvasEmpty: document.querySelector("#decision-canvas-empty"),
+  decisionCanvasFrame: document.querySelector("#decision-canvas-frame"),
+  decisionCanvasImage: document.querySelector("#decision-canvas-image"),
+  decisionCanvasOverlay: document.querySelector("#decision-canvas-overlay"),
+  decisionCanvasSummary: document.querySelector("#decision-canvas-summary"),
   documentCount: document.querySelector("#document-count"),
   documentList: document.querySelector("#document-list"),
+  elevatorDown: document.querySelector("#elevator-down"),
+  elevatorUp: document.querySelector("#elevator-up"),
   heartbeat: document.querySelector("#heartbeat"),
   hardRefreshUi: document.querySelector("#hard-refresh-ui"),
   previewCaption: document.querySelector("#preview-caption"),
@@ -61,8 +70,15 @@ const elements = {
   previewName: document.querySelector("#preview-name"),
   previewPath: document.querySelector("#preview-path"),
   previewViewport: document.querySelector("#preview-viewport"),
+  printedContextEmpty: document.querySelector("#printed-context-empty"),
+  printedContextFrame: document.querySelector("#printed-context-frame"),
+  printedContextImage: document.querySelector("#printed-context-image"),
+  printedContextOverlay: document.querySelector("#printed-context-overlay"),
+  printedContextSummary: document.querySelector("#printed-context-summary"),
   projectRoot: document.querySelector("#project-root"),
   refreshArtifacts: document.querySelector("#refresh-artifacts"),
+  refreshDecisionCanvas: document.querySelector("#refresh-decision-canvas"),
+  refreshPrintedContext: document.querySelector("#refresh-printed-context"),
   refreshAristotel: document.querySelector("#refresh-aristotel"),
   sampleDetail: document.querySelector("#sample-detail"),
   sampleDetailBackdrop: document.querySelector("#sample-detail-backdrop"),
@@ -166,6 +182,42 @@ function hardRefreshUi() {
   window.location.replace(url.toString());
 }
 
+function activeElevatorTarget() {
+  if (elements.sampleDetail?.classList.contains("visible")) {
+    const detailCard = elements.sampleDetail.querySelector(".sample-detail-card");
+    if (detailCard && detailCard.scrollHeight > detailCard.clientHeight) {
+      return detailCard;
+    }
+  }
+  return document.scrollingElement || document.documentElement;
+}
+
+function scrollContainerTo(container, targetTop) {
+  const startTop = container.scrollTop;
+  const distance = targetTop - startTop;
+  if (Math.abs(distance) < 4) return;
+
+  const duration = Math.min(720, Math.max(260, Math.abs(distance) * 0.16));
+  const startedAt = performance.now();
+  const easeOutCubic = (value) => 1 - Math.pow(1 - value, 3);
+
+  function step(now) {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    container.scrollTop = startTop + distance * easeOutCubic(progress);
+    if (progress < 1) {
+      window.requestAnimationFrame(step);
+    }
+  }
+
+  window.requestAnimationFrame(step);
+}
+
+function elevatorScroll(direction) {
+  const target = activeElevatorTarget();
+  const maxTop = Math.max(0, target.scrollHeight - target.clientHeight);
+  scrollContainerTo(target, direction === "up" ? 0 : maxTop);
+}
+
 function stageProgressMarkup(documentRecord) {
   return state.overview.stages
     .map((stage) => (
@@ -204,9 +256,11 @@ function renderDocuments() {
     button.addEventListener("click", () => {
       state.selectedDocument = record.id;
       state.selectedArtifactPath = null;
+      state.decisionCanvas = null;
       renderDocuments();
       renderPhaseCompletion();
       loadArtifacts();
+      loadDecisionCanvas();
     });
     elements.documentList.appendChild(button);
   });
@@ -823,7 +877,204 @@ async function loadArtifacts() {
   );
   try {
     renderArtifacts(await requestJson(`/api/artifacts?${params}`));
+    if (state.selectedStage === "n04") {
+      loadPrintedContextCanvas();
+    }
+    if (state.selectedStage === "n05") {
+      loadDecisionCanvas();
+    }
   } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+function renderPrintedContextBoxes() {
+  const payload = state.printedContextCanvas;
+  const image = elements.printedContextImage;
+  const overlay = elements.printedContextOverlay;
+  overlay.innerHTML = "";
+
+  if (!payload?.available || !image.naturalWidth || !image.naturalHeight) {
+    return;
+  }
+
+  const imageRect = image.getBoundingClientRect();
+  const frameRect = elements.printedContextFrame.getBoundingClientRect();
+  const scaleX = imageRect.width / image.naturalWidth;
+  const scaleY = imageRect.height / image.naturalHeight;
+
+  (payload.boxes || []).forEach((box) => {
+    const bbox = box.bbox || {};
+    const left = imageRect.left - frameRect.left + bbox.x1 * scaleX;
+    const top = imageRect.top - frameRect.top + bbox.y1 * scaleY;
+    const width = Math.max(14, (bbox.x2 - bbox.x1) * scaleX);
+    const height = Math.max(12, (bbox.y2 - bbox.y1) * scaleY);
+    const candidates = (box.candidates || [])
+      .map((candidate, index) => `${index + 1}. ${candidate.text}`)
+      .join(" · ");
+    const marker = document.createElement("button");
+    marker.className = [
+      "decision-text-box",
+      "printed-context-box",
+      box.analysis_mask_used_for_tesseract ? "mask-source" : "",
+      box.text ? "ready" : "weak",
+    ].filter(Boolean).join(" ");
+    marker.style.left = `${left}px`;
+    marker.style.top = `${top}px`;
+    marker.style.width = `${width}px`;
+    marker.style.height = `${height}px`;
+    marker.title = [
+      `token: ${box.token_id || "unknown"}`,
+      `layer: ${box.layer || "unknown"}`,
+      `visual: ${box.visual_class || "unknown"}`,
+      `source: ${box.tesseract_input_source || "unknown"}`,
+      `bbox source: ${box.n04_crop_bbox_source || "route_bbox"}`,
+      `derived: ${box.black_mask_derived_bbox_reason || "none"}`,
+      `ocr mask: ${box.black_mask_reflected_ocr_source_kind || "regular_crop"}`,
+      `mask: ${box.mask_source || "none"}`,
+      `candidates: ${candidates || "none"}`,
+    ].join("\n");
+    marker.innerHTML = `
+      <span class="decision-text">${escapeHtml(box.text || "∅")}</span>
+      <span class="decision-score">${escapeHtml(String(box.layer || "raw"))}</span>
+    `;
+    marker.addEventListener("click", () => {
+      const copied = candidates || box.text || "";
+      copyTextToClipboard(copied);
+      showToast(`Copied N04 candidates for ${box.token_id || "printed token"}`);
+    });
+    overlay.appendChild(marker);
+  });
+}
+
+function renderPrintedContextCanvas(payload) {
+  state.printedContextCanvas = payload;
+  if (!payload?.available) {
+    elements.printedContextFrame.classList.remove("visible");
+    elements.printedContextEmpty.style.display = "grid";
+    elements.printedContextEmpty.textContent = (
+      payload?.reason
+        ? `Printed context unavailable: ${payload.reason}`
+        : "Run N04, then refresh this canvas to see printed OCR context tokens."
+    );
+    elements.printedContextSummary.textContent = "No canvas";
+    return;
+  }
+
+  const summary = payload.summary || {};
+  elements.printedContextSummary.textContent = (
+    `${summary.box_count || 0} boxes · `
+    + `${summary.boxes_with_text || 0} with text · `
+    + `${summary.black_mask_box_count || 0} black-mask · `
+    + `${payload.source_document_kind || "canvas"}`
+  );
+  elements.printedContextEmpty.style.display = "none";
+  elements.printedContextFrame.classList.add("visible");
+  elements.printedContextOverlay.innerHTML = "";
+  elements.printedContextImage.src = payload.source_document_url;
+  if (elements.printedContextImage.complete) {
+    renderPrintedContextBoxes();
+  }
+}
+
+async function loadPrintedContextCanvas() {
+  if (!state.selectedDocument) {
+    return;
+  }
+  elements.printedContextSummary.textContent = "Reading N04 printed context...";
+  try {
+    const params = new URLSearchParams({ document: state.selectedDocument });
+    renderPrintedContextCanvas(
+      await requestJson(`/api/n04-printed-context-canvas?${params}`),
+    );
+  } catch (error) {
+    elements.printedContextSummary.textContent = "Canvas failed";
+    showToast(error.message, true);
+  }
+}
+
+function renderDecisionCanvasBoxes() {
+  const payload = state.decisionCanvas;
+  const image = elements.decisionCanvasImage;
+  const overlay = elements.decisionCanvasOverlay;
+  overlay.innerHTML = "";
+
+  if (!payload?.available || !image.naturalWidth || !image.naturalHeight) {
+    return;
+  }
+
+  const imageRect = image.getBoundingClientRect();
+  const frameRect = elements.decisionCanvasFrame.getBoundingClientRect();
+  const scaleX = imageRect.width / image.naturalWidth;
+  const scaleY = imageRect.height / image.naturalHeight;
+
+  (payload.boxes || []).forEach((box) => {
+    const bbox = box.bbox || {};
+    const left = imageRect.left - frameRect.left + bbox.x1 * scaleX;
+    const top = imageRect.top - frameRect.top + bbox.y1 * scaleY;
+    const width = Math.max(14, (bbox.x2 - bbox.x1) * scaleX);
+    const height = Math.max(12, (bbox.y2 - bbox.y1) * scaleY);
+    const marker = document.createElement("button");
+    marker.className = `decision-text-box ${box.status === "provisional_ready" ? "ready" : "weak"}`;
+    marker.style.left = `${left}px`;
+    marker.style.top = `${top}px`;
+    marker.style.width = `${width}px`;
+    marker.style.height = `${height}px`;
+    marker.title = [
+      `unit: ${box.text_unit_id || "unknown"}`,
+      `status: ${box.status || "unknown"}`,
+      `score: ${box.score ?? "—"}`,
+      `backup: ${box.backup_string || "none"}`,
+    ].join("\n");
+    marker.innerHTML = `
+      <span class="decision-text">${escapeHtml(box.selected_text || "∅")}</span>
+      <span class="decision-score">${escapeHtml(String(box.status || "unknown"))}</span>
+    `;
+    marker.addEventListener("click", () => {
+      copyTextToClipboard(box.backup_string || box.selected_text || "");
+      showToast(`Copied ${box.backup_string ? "backup string" : "text"} for ${box.text_unit_id || "unit"}`);
+    });
+    overlay.appendChild(marker);
+  });
+}
+
+function renderDecisionCanvas(payload) {
+  state.decisionCanvas = payload;
+  if (!payload?.available) {
+    elements.decisionCanvasFrame.classList.remove("visible");
+    elements.decisionCanvasEmpty.style.display = "grid";
+    elements.decisionCanvasEmpty.textContent = (
+      payload?.reason
+        ? `Decision canvas unavailable: ${payload.reason}`
+        : "Run N05, then refresh this canvas to see provisional OCR text placed by bbox."
+    );
+    elements.decisionCanvasSummary.textContent = "No canvas";
+    return;
+  }
+
+  const summary = payload.summary || {};
+  elements.decisionCanvasSummary.textContent = (
+    `${summary.box_count || 0} boxes · ${summary.ready_count || 0} ready`
+  );
+  elements.decisionCanvasEmpty.style.display = "none";
+  elements.decisionCanvasFrame.classList.add("visible");
+  elements.decisionCanvasOverlay.innerHTML = "";
+  elements.decisionCanvasImage.src = payload.source_document_url;
+  if (elements.decisionCanvasImage.complete) {
+    renderDecisionCanvasBoxes();
+  }
+}
+
+async function loadDecisionCanvas() {
+  if (!state.selectedDocument) {
+    return;
+  }
+  elements.decisionCanvasSummary.textContent = "Reading N05 decision matrix...";
+  try {
+    const params = new URLSearchParams({ document: state.selectedDocument });
+    renderDecisionCanvas(await requestJson(`/api/n05-decision-canvas?${params}`));
+  } catch (error) {
+    elements.decisionCanvasSummary.textContent = "Canvas failed";
     showToast(error.message, true);
   }
 }
@@ -1906,6 +2157,18 @@ document.querySelectorAll(".stage-tab").forEach((button) => {
     elements.artifactSearch.value = button.dataset.query || "";
     state.selectedArtifactPath = null;
     loadArtifacts();
+    if (button.dataset.decisionCanvas === "true") {
+      document.querySelector(".decision-canvas-panel")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+    if (state.selectedStage === "n04") {
+      document.querySelector(".printed-context-panel")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
   });
 });
 
@@ -1913,6 +2176,14 @@ elements.stopButton.addEventListener("click", stopCommand);
 elements.hardRefreshUi.addEventListener("click", hardRefreshUi);
 elements.refreshArtifacts.addEventListener("click", () => {
   loadOverview({ refreshArtifacts: true });
+});
+elements.refreshPrintedContext.addEventListener("click", loadPrintedContextCanvas);
+elements.printedContextImage.addEventListener("load", renderPrintedContextBoxes);
+elements.refreshDecisionCanvas.addEventListener("click", loadDecisionCanvas);
+elements.decisionCanvasImage.addEventListener("load", renderDecisionCanvasBoxes);
+window.addEventListener("resize", () => {
+  renderPrintedContextBoxes();
+  renderDecisionCanvasBoxes();
 });
 elements.refreshAristotel.addEventListener("click", loadAristotelPreview);
 elements.refreshTraining.addEventListener("click", loadTrainingOverview);
@@ -1969,6 +2240,8 @@ document.querySelectorAll(".sidebar-refresh-training").forEach((button) => {
 elements.clearConsole.addEventListener("click", () => {
   elements.consoleOutput.textContent = "";
 });
+elements.elevatorUp?.addEventListener("click", () => elevatorScroll("up"));
+elements.elevatorDown?.addEventListener("click", () => elevatorScroll("down"));
 elements.artifactSearch.addEventListener("input", () => {
   window.clearTimeout(state.artifactSearchTimer);
   state.artifactSearchTimer = window.setTimeout(loadArtifacts, 260);

@@ -102,6 +102,10 @@ def _judge_segment(
         settings.get("local_interrogation_too_narrow_ratio"),
         0.45,
     )
+    min_segment_width = _safe_float(
+        settings.get("local_interrogation_min_segment_width_px"),
+        8.0,
+    )
 
     geometry = _embedded_geometry(segment)
     profile = _profile_geometry(geometry)
@@ -115,11 +119,18 @@ def _judge_segment(
         or geometry.get("likely_fragment")
         or profile.get("profile_too_narrow")
     )
+    tiny_absolute_width = 0.0 < width < min_segment_width
     too_wide = ratio >= too_wide_ratio or geometry_too_wide
-    too_narrow = 0.0 < ratio <= too_narrow_ratio or geometry_too_narrow
+    too_narrow = 0.0 < ratio <= too_narrow_ratio or geometry_too_narrow or tiny_absolute_width
 
     suspicion = 0.0
     reasons = []
+    if tiny_absolute_width:
+        suspicion += _safe_float(
+            settings.get("local_interrogation_tiny_segment_suspicion"),
+            1.75,
+        )
+        reasons.append("segment_width_below_real_letter_floor")
     if too_wide:
         suspicion += min(1.0, max(0.25, ratio - too_wide_ratio + 0.25))
         reasons.append("segment_too_wide_possible_joined_letters")
@@ -142,10 +153,81 @@ def _judge_segment(
         "width_to_expected_ratio": ratio,
         "too_wide": too_wide,
         "too_narrow": too_narrow,
+        "tiny_absolute_width": tiny_absolute_width,
         "likely_joined_letters": too_wide,
         "likely_fragment": too_narrow,
         "suspicion": round(suspicion, 6),
         "reasons": reasons,
+    }
+
+
+def _word_ocr_length_hint(entry: dict) -> tuple[int, float]:
+    """Return Word OCR length evidence attached to this text unit."""
+
+    split_evidence = entry.get("word_ocr_split_evidence") or {}
+    predicted_length = _safe_int(split_evidence.get("predicted_length"), 0)
+    confidence = _safe_float(split_evidence.get("length_confidence"), 0.0)
+    return predicted_length, confidence
+
+
+def _length_mismatch_penalty(entry: dict, path: dict, settings: dict) -> tuple[float, dict]:
+    """Penalize paths that disagree with useful length evidence.
+
+    ScribeTrain is still the primary splitter, but if it proposes a path with
+    extra phantom cuts while Word OCR predicts a plausible length, the path
+    should not win just because raw boundary recall is high.
+    """
+
+    word_length, word_confidence = _word_ocr_length_hint(entry)
+    segment_count = _safe_int(path.get("segment_count"), len(path.get("segments") or []))
+    if word_length <= 0 or segment_count <= 0:
+        return 0.0, {
+            "applied": False,
+            "reason": "missing_length_evidence",
+        }
+
+    delta = abs(segment_count - word_length)
+    if delta <= 0:
+        return 0.0, {
+            "applied": False,
+            "word_ocr_predicted_length": word_length,
+            "segment_count": segment_count,
+            "length_delta": delta,
+            "reason": "length_agrees",
+        }
+
+    # Low-confidence length is not trusted alone, but it can still be used as
+    # a tie-breaker when geometry already looks suspicious.
+    confidence_floor = _safe_float(
+        settings.get("local_interrogation_length_hint_min_confidence"),
+        0.12,
+    )
+    if word_confidence < confidence_floor:
+        return 0.0, {
+            "applied": False,
+            "word_ocr_predicted_length": word_length,
+            "word_ocr_length_confidence": word_confidence,
+            "segment_count": segment_count,
+            "length_delta": delta,
+            "reason": "word_ocr_length_confidence_below_floor",
+        }
+
+    penalty_per_delta = _safe_float(
+        settings.get("local_interrogation_length_mismatch_penalty"),
+        0.10,
+    )
+    penalty = min(
+        _safe_float(settings.get("local_interrogation_max_length_mismatch_penalty"), 0.35),
+        penalty_per_delta * delta,
+    )
+    return penalty, {
+        "applied": True,
+        "word_ocr_predicted_length": word_length,
+        "word_ocr_length_confidence": word_confidence,
+        "segment_count": segment_count,
+        "length_delta": delta,
+        "penalty": round(penalty, 6),
+        "reason": "segment_count_disagrees_with_word_ocr_length",
     }
 
 
@@ -167,6 +249,12 @@ def _judge_path(entry: dict, path: dict, settings: dict) -> dict:
         settings.get("local_interrogation_suspicion_penalty"),
         0.18,
     ) * suspicion_total
+    length_penalty, length_judgement = _length_mismatch_penalty(
+        entry,
+        path,
+        settings,
+    )
+    penalty += length_penalty
     return {
         "enabled": True,
         "expected_segment_count": expected_count,
@@ -176,6 +264,7 @@ def _judge_path(entry: dict, path: dict, settings: dict) -> dict:
         "too_wide_segment_count": len(too_wide),
         "too_narrow_segment_count": len(too_narrow),
         "suspicion_total": round(suspicion_total, 6),
+        "length_judgement": length_judgement,
         "score_penalty": round(penalty, 6),
         "segments": segment_judgements,
     }
@@ -336,6 +425,7 @@ def apply_local_interrogation(
         paths = [*annotated_paths, *alternatives]
         paths.sort(
             key=lambda path: (
+                _path_selection_priority(updated_entry, path, settings),
                 -_safe_float(path.get("score_hint"), 0.0),
                 _safe_int(path.get("segment_count"), 0),
                 str(path.get("path_id", "")),
@@ -353,3 +443,47 @@ def apply_local_interrogation(
         }
         output.append(updated_entry)
     return output
+
+
+def _path_selection_priority(entry: dict, path: dict, settings: dict) -> int:
+    """Prefer ScribeTrain paths, then optional Word OCR fallbacks.
+
+    Character-unit proposer paths are legacy-only now. Whole-unit paths are
+    especially dangerous here because downstream letter experts are letter-level.
+    """
+
+    source = str(path.get("source") or "")
+    path_type = str(path.get("type") or "")
+    segment_count = _safe_int(path.get("segment_count"), len(path.get("segments") or []))
+    if (
+        source == "scribetrain_word_segmenter"
+        or path_type == "scribetrain_word_trace_sequence"
+        or path_type == "local_interrogation_split"
+    ):
+        return 0
+
+    if not bool(settings.get("prefer_word_ocr_boundary_paths", True)):
+        return 1
+
+    split_evidence = entry.get("word_ocr_split_evidence") or {}
+    if not split_evidence.get("available"):
+        return 1
+
+    try:
+        predicted_length = int(split_evidence.get("predicted_length") or 0)
+    except (TypeError, ValueError):
+        predicted_length = 0
+    minimum_length = _safe_int(
+        settings.get("word_ocr_prefer_boundary_min_length"),
+        2,
+    )
+    if predicted_length < minimum_length:
+        return 1
+
+    if path_type == "word_ocr_boundary_sequence":
+        return 1
+    if segment_count > 1:
+        return 2
+    if path_type == "whole_unit":
+        return 4
+    return 3

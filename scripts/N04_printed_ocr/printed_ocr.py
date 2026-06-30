@@ -20,7 +20,12 @@ from n04_io import (
     reset_output_dir,
     save_json,
 )
-from n04_records import build_printed_text_unit, print_summary, summarize_printed_text_map
+from n04_records import (
+    build_printed_context_layer,
+    build_printed_text_unit,
+    print_summary,
+    summarize_printed_text_map,
+)
 from n04_routing import get_visual_class, load_n03_visual_routes, select_printed_candidates
 
 
@@ -85,7 +90,8 @@ def build_printed_text_map(
         try:
             copied_crop_path = copy_candidate_crop_to_n04(
                 route_record=route_record,
-                folders=folders
+                folders=folders,
+                settings=settings,
             )
 
             if copied_crop_path is None:
@@ -128,6 +134,15 @@ def build_printed_text_map(
         skipped_records=skipped_records,
         failed_records=failed_records
     )
+    printed_context_layer = build_printed_context_layer(printed_text_units)
+    summary["printed_context_token_count"] = printed_context_layer.get(
+        "summary",
+        {},
+    ).get("token_count", 0)
+    summary["black_mask_context_token_count"] = printed_context_layer.get(
+        "summary",
+        {},
+    ).get("black_mask_token_count", 0)
 
     result = {
         "node": NODE_NAME,
@@ -148,6 +163,7 @@ def build_printed_text_map(
         "summary": summary,
 
         "printed_text_units": printed_text_units,
+        "printed_context_layer": printed_context_layer,
         "skipped": skipped_records,
         "failed": failed_records
     }

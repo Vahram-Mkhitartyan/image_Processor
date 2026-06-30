@@ -154,6 +154,13 @@ class ArtifactSaver:
                 folders["full_images_dir"]
             )
 
+        if "denoised_deskewed_cropped" in state["images"]:
+            state["artifacts"]["denoised_deskewed_cropped"] = self.save_stage(
+                state["images"]["denoised_deskewed_cropped"],
+                "07_denoised_deskewed_cropped",
+                folders["full_images_dir"],
+            )
+
         if "horizontal_lines_mask" in state["images"]:
             state["artifacts"]["horizontal_lines_mask"] = self.save_mask_stage(
                 state["images"]["horizontal_lines_mask"],

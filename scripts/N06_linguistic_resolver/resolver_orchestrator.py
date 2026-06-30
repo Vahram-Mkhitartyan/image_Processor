@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.N06_linguistic_resolver.input.word_token_builder import (
+    build_token_from_compact_candidate_string,
     build_tokens_from_n05_payload,
     build_tokens_from_words,
 )
@@ -122,12 +123,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run N06 linguistic resolver.")
     parser.add_argument("--settings", default=str(DEFAULT_SETTINGS_PATH))
     parser.add_argument("--input-json", default="")
+    parser.add_argument(
+        "--compact-candidates",
+        default="",
+        help=(
+            "Compact N05 backup string, for example "
+            "'l:Մ,b:Ն|l:կ,b:ք|l:ր,b:ռ'."
+        ),
+    )
     parser.add_argument("--words", nargs="*", default=[])
     parser.add_argument("--output-json", default="temp_processing/n06_linguistic_resolver/result.json")
     args = parser.parse_args()
 
     settings = load_json(args.settings)
-    if args.input_json:
+    if args.compact_candidates:
+        tokens = [
+            build_token_from_compact_candidate_string(args.compact_candidates)
+        ]
+    elif args.input_json:
         payload = load_json(args.input_json)
         tokens = build_tokens_from_n05_payload(payload)
     else:

@@ -120,15 +120,21 @@ def prepare_tensor(
         raise ValueError("CNN input image has invalid dimensions.")
 
     polarity = _detect_background_polarity(image)
-    supported_modes = {"legacy_raw_invert", "normalize_black_ink_on_white"}
+    supported_modes = {
+        "legacy_raw_invert",
+        "normalize_black_ink_on_white",
+        "white_ink_on_black__ink_1_background_0",
+    }
     if polarity_mode not in supported_modes:
         raise ValueError(
             f"Unsupported CNN input_polarity_mode {polarity_mode!r}; "
             f"expected one of {sorted(supported_modes)}."
         )
-    if (
-        polarity_mode == "normalize_black_ink_on_white"
-        and polarity == "white_ink_on_black"
+    if polarity_mode == "normalize_black_ink_on_white" and polarity == "white_ink_on_black":
+        image = ImageOps.invert(image)
+    elif (
+        polarity_mode == "white_ink_on_black__ink_1_background_0"
+        and polarity == "black_ink_on_white"
     ):
         image = ImageOps.invert(image)
 
@@ -137,29 +143,47 @@ def prepare_tensor(
     resized_height = max(1, int(source_height * scale))
     resampling = getattr(Image, "Resampling", Image).BILINEAR
     image = image.resize((resized_width, resized_height), resampling)
-    canvas = Image.new("L", (image_size, image_size), color=255)
+    canvas_color = (
+        0
+        if polarity_mode == "white_ink_on_black__ink_1_background_0"
+        else 255
+    )
+    canvas = Image.new("L", (image_size, image_size), color=canvas_color)
     offset = (
         (image_size - resized_width) // 2,
         (image_size - resized_height) // 2,
     )
     canvas.paste(image, offset)
-    array = np.asarray(canvas, dtype=np.float32) / 255.0
-    tensor = torch.from_numpy(1.0 - array).unsqueeze(0).unsqueeze(0)
+    if polarity_mode == "white_ink_on_black__ink_1_background_0":
+        array = (np.asarray(canvas, dtype=np.uint8) >= 128).astype(np.float32)
+        tensor_transform = "threshold_white_ink_as_one"
+    else:
+        array = np.asarray(canvas, dtype=np.float32) / 255.0
+        array = 1.0 - array
+        tensor_transform = "one_minus_grayscale"
+    tensor = torch.from_numpy(array).unsqueeze(0).unsqueeze(0)
     preprocessing = {
         "source_path": str(source),
         "source_size": {"width": source_width, "height": source_height},
         "detected_polarity": polarity,
         "polarity_mode": polarity_mode,
         "polarity_normalized_to": (
+            "white_ink_on_black"
+            if polarity_mode == "white_ink_on_black__ink_1_background_0"
+            else
             "black_ink_on_white"
             if polarity_mode == "normalize_black_ink_on_white"
             else "preserved_source_polarity"
         ),
-        "resize_mode": "aspect_preserving_bilinear_with_white_padding",
+        "resize_mode": (
+            "aspect_preserving_bilinear_with_black_padding"
+            if polarity_mode == "white_ink_on_black__ink_1_background_0"
+            else "aspect_preserving_bilinear_with_white_padding"
+        ),
         "model_size": {"width": image_size, "height": image_size},
         "resized_size": {"width": resized_width, "height": resized_height},
         "paste_offset": {"x": offset[0], "y": offset[1]},
-        "tensor_transform": "one_minus_grayscale",
+        "tensor_transform": tensor_transform,
     }
     return tensor, preprocessing
 

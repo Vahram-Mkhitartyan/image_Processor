@@ -24,10 +24,12 @@ Current Flow
 ------------
 1. Load N03 route metadata.
 2. Select printed_only and mixed routes.
-3. Reference the canonical N02 full-text crop without duplicating it.
-4. Normalize to dark ink on white, then scale and pad a Tesseract-ready crop.
-5. Run primary and fallback Armenian OCR configurations.
-6. Store raw candidates, coordinates, skips, failures, and summary metadata.
+3. For normal/color crops, reference the canonical N02 full-text crop.
+4. For black printed context, derive the bbox from 13_black_ink_mask.png, then
+   reflect that bbox onto 19_printed_ocr_tesseract_mask.png for OCR pixels.
+5. Normalize to dark ink on white, then scale and pad a Tesseract-ready crop.
+6. Run primary and fallback Armenian OCR configurations.
+7. Store raw candidates, coordinates, skips, failures, and summary metadata.
 
 OCR Engine
 ----------
@@ -35,7 +37,7 @@ OCR Engine
     Tesseract 5.5.2
     primary language: hye-calfa-n
     fallback language: hye
-    default page segmentation mode: 6
+    default page segmentation mode: 3
 
 Crop selection priority:
 
@@ -46,10 +48,19 @@ Crop selection priority:
     original_crop_path
     source_crop_path
 
-analysis_mask_crop_path is intentionally excluded because it is the inverted
-white-ink-on-black topology mask for ScribeTrace. N04 starts from the regular
-full-text visual crop, converts it to grayscale, enforces dark ink on a white
-background, and uses normal Otsu binary thresholding.
+For black printed context, N04 does not trust the tiny route crop by itself.
+It uses black ink as geometry evidence and printed OCR masks as reading
+evidence:
+
+    13_black_ink_mask.png:
+        decides the full-document bbox.
+
+    19_printed_ocr_tesseract_mask.png:
+        supplies the actual OCR crop pixels.
+
+The output JSON preserves original_document_bbox, black_mask_derived_bbox,
+black_mask_derived_bbox_reason, n04_crop_bbox_source, and the reflected crop
+path so the UI can show exactly which bbox/source was used.
 
 Files
 -----

@@ -126,6 +126,30 @@ the future giant:
    The CNN evidence is intentionally segment-level. Whole-unit crops are too
    wide and can make the model confidently wrong.
 
+9. Combined expert output
+   The letter matrix is now repackaged into:
+
+       combined_expert_output
+
+   This is the stable handoff contract for N06. Each token contains the current
+   best text, per-position backup candidates, source coverage, conflict flags,
+   crop paths, and bboxes. It is not final OCR; it is the shared battlefield
+   where every expert places evidence in one shape.
+
+10. Decision matrix
+   The first-pass decision matrix ranks provisional word candidates from the
+   combined expert output:
+
+       decision_matrix
+       matrices.decision
+
+   It performs a bounded beam search over backup letters. Scores are made from
+   visible terms: expert candidate score, confidence, source agreement bonus,
+   conflict penalty, and empty-position penalty.
+
+   The decision matrix is still provisional. N06 n-gram repair, morphology,
+   and future correctness-history learning are allowed to override it.
+
 Important Boundaries
 --------------------
 This layer DOES:
@@ -147,6 +171,8 @@ This layer DOES:
 - preserve enough paths and artifact links for manual four-expert probes
 - attach selected-segment CNN evidence when the character_detector expert is
   enabled
+- create a combined N06-ready candidate token surface
+- rank provisional word candidates with visible scoring terms
 
 This layer DOES NOT:
 
@@ -158,6 +184,7 @@ This layer DOES NOT:
 - learn the final formula yet
 - blindly trust the loudest model confidence
 - treat the CNN top-1 as final truth
+- claim the decision matrix is linguistically final
 
 Why This Exists
 ---------------
@@ -181,3 +208,4 @@ Planned upgrades:
 - final formula scoring
 - correctness-history training data export
 - expert reliability weighting based on clean history and case fingerprints
+- N06 n-gram / morphology feedback into the decision matrix score

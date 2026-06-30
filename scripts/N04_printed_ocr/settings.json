@@ -1,3 +1,15 @@
 {
-  "reset_output": true
+  "reset_output": true,
+  "black_bbox_left_context_px": 48,
+  "black_bbox_left_context_ratio": 0.65,
+  "black_bbox_max_left_context_px": 180,
+  "black_bbox_right_context_px": 24,
+  "black_bbox_right_context_ratio": 0.25,
+  "black_bbox_max_right_context_px": 90,
+  "black_bbox_vertical_context_px": 6,
+  "black_bbox_vertical_context_ratio": 0.2,
+  "black_bbox_output_padding_px": 3,
+  "black_bbox_min_component_area": 2,
+  "black_bbox_line_width_ratio": 0.82,
+  "black_bbox_line_aspect_ratio": 36.0
 }

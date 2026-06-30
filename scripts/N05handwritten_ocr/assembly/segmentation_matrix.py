@@ -50,6 +50,27 @@ def _word_ocr_split_evidence(unit: dict) -> dict:
     }
 
 
+def _scribetrain_split_evidence(unit: dict) -> dict:
+    """Extract ScribeTrain word-level split hypotheses for matrix diagnostics."""
+
+    payload = unit.get("scribetrain_word_segmentation") or {}
+    paths = payload.get("paths") or []
+    return {
+        "available": bool(paths),
+        "attempted": bool(payload.get("attempted")),
+        "status": payload.get("status"),
+        "path_count": len(paths),
+        "predicted_length": payload.get("predicted_length"),
+        "expected_split_count": payload.get("expected_split_count"),
+        "length_confidence": payload.get("length_confidence"),
+        "model_name": payload.get("model_name"),
+        "warning": (
+            "ScribeTrain is the primary word splitter. Word OCR split lines are "
+            "kept as soft evidence/fallback only."
+        ),
+    }
+
+
 def _whole_unit_segment(unit: dict) -> dict:
     """Build the fallback segment that represents the whole text unit."""
 
@@ -232,10 +253,8 @@ def _build_word_ocr_boundary_path(
                 bbox={"x1": x1, "y1": 0, "x2": x2, "y2": height},
                 role="character_candidate",
                 source="word_level_ocr_boundary_head",
-                mask_crop_path=unit.get("analysis_mask_crop_path")
-                or unit.get("scribetrace_mask_crop_path"),
-                visual_crop_path=unit.get("n05_selected_crop_path")
-                or unit.get("scribetrace_visual_crop_path"),
+                mask_crop_path=None,
+                visual_crop_path=None,
                 source_segment={
                     "left_boundary_x": x1,
                     "right_boundary_x": x2,
@@ -368,40 +387,58 @@ def build_segmentation_paths(unit: dict, settings: dict | None = None) -> list[d
 
     settings = settings or {}
     max_paths = int(settings.get("max_segmentation_paths", 8))
+    primary_segmenter = str(settings.get("primary_segmenter", "scribetrain"))
+    use_legacy_proposer = bool(
+        settings.get("legacy_character_unit_proposer_enabled", False)
+    )
+    legacy_fallback = bool(
+        settings.get("legacy_character_unit_proposer_fallback", False)
+    )
     proposal = unit.get("character_unit_proposal") or {}
     hypotheses = proposal.get("segmentation_hypotheses") or []
 
     paths: list[dict] = []
-    for index, hypothesis in enumerate(hypotheses):
-        if not isinstance(hypothesis, dict):
-            continue
-        hypothesis_id = str(
-            hypothesis.get("hypothesis_id")
-            or hypothesis.get("id")
-            or f"h{index}"
-        )
-        segments = [
-            _segment_from_proposal(hypothesis_id, segment_index, segment)
-            for segment_index, segment in enumerate(hypothesis.get("segments") or [])
-            if isinstance(segment, dict)
-        ]
-        if not segments:
-            continue
-        paths.append(
-            make_segmentation_path(
-                path_id=hypothesis_id,
-                path_type=str(hypothesis.get("type") or "proposal"),
-                segments=segments,
-                score_hint=float(hypothesis.get("score_hint") or 0.0),
-                source="character_unit_proposer",
-                reason=str(hypothesis.get("reason") or ""),
-                evidence={
-                    "recovery_needed": bool(proposal.get("recovery_needed")),
-                    "recovery_reasons": proposal.get("recovery_reasons", []),
-                    "source_hypothesis": hypothesis,
-                },
+    scribetrain_payload = unit.get("scribetrain_word_segmentation") or {}
+    scribetrain_paths = [
+        copy.deepcopy(path)
+        for path in scribetrain_payload.get("paths") or []
+        if isinstance(path, dict)
+    ]
+    if primary_segmenter == "scribetrain" and scribetrain_paths:
+        paths.extend(scribetrain_paths)
+
+    if use_legacy_proposer or (legacy_fallback and not paths):
+        for index, hypothesis in enumerate(hypotheses):
+            if not isinstance(hypothesis, dict):
+                continue
+            hypothesis_id = str(
+                hypothesis.get("hypothesis_id")
+                or hypothesis.get("id")
+                or f"h{index}"
             )
-        )
+            segments = [
+                _segment_from_proposal(hypothesis_id, segment_index, segment)
+                for segment_index, segment in enumerate(hypothesis.get("segments") or [])
+                if isinstance(segment, dict)
+            ]
+            if not segments:
+                continue
+            paths.append(
+                make_segmentation_path(
+                    path_id=f"legacy_{hypothesis_id}",
+                    path_type=str(hypothesis.get("type") or "proposal"),
+                    segments=segments,
+                    score_hint=float(hypothesis.get("score_hint") or 0.0),
+                    source="character_unit_proposer_legacy",
+                    reason=str(hypothesis.get("reason") or ""),
+                    evidence={
+                        "recovery_needed": bool(proposal.get("recovery_needed")),
+                        "recovery_reasons": proposal.get("recovery_reasons", []),
+                        "source_hypothesis": hypothesis,
+                        "legacy_fallback": not use_legacy_proposer,
+                    },
+                )
+            )
 
     if not paths:
         paths.append(
@@ -419,9 +456,9 @@ def build_segmentation_paths(unit: dict, settings: dict | None = None) -> list[d
         )
 
     split_evidence = _word_ocr_split_evidence(unit)
-    # Existing proposer paths remain first-class citizens. Word OCR only adds
-    # alignment evidence or an extra candidate path; it does not overwrite the
-    # geometric segment proposals.
+    # ScribeTrain paths remain first-class citizens. Word OCR only adds
+    # alignment evidence or an extra fallback candidate path; it does not
+    # overwrite the geometric sequence model.
     paths = [
         _attach_word_ocr_alignment(path, split_evidence, settings)
         for path in paths
@@ -454,6 +491,7 @@ def build_segmentation_matrix(units: list[dict], settings: dict | None = None) -
             "group_id": unit.get("group_id"),
             "selected_path_id": None,
             "path_count": len(paths := build_segmentation_paths(unit, settings)),
+            "scribetrain_split_evidence": _scribetrain_split_evidence(unit),
             "word_ocr_split_evidence": _word_ocr_split_evidence(unit),
             "paths": paths,
         }

@@ -2268,6 +2268,8 @@ def write_checkpoint_report(
     settings: dict,
     checkpoint_path: Path | None = None,
     limit: int | None = None,
+    validation_samples: int | None = None,
+    test_samples: int | None = None,
 ) -> dict:
     """Evaluate a saved ScribeTrain checkpoint and write a report.
 
@@ -2300,6 +2302,10 @@ def write_checkpoint_report(
         dataset_settings,
         limited_run=bool(limit),
     )
+    if validation_samples is not None or test_samples is not None:
+        validation_count = int(validation_samples or validation_count)
+        test_count = int(test_samples or test_count)
+        evaluation_split_policy = "explicit checkpoint evaluation split"
     batch_size = int(training_settings.get("batch_size", 96))
     workers = int(training_settings.get("num_workers", 0))
     device = _choose_device(settings)
@@ -2497,6 +2503,18 @@ def main() -> None:
         default="",
         help="Optional checkpoint path for --checkpoint-report.",
     )
+    parser.add_argument(
+        "--validation-samples",
+        type=int,
+        default=0,
+        help="Override validation sample count for --checkpoint-report.",
+    )
+    parser.add_argument(
+        "--test-samples",
+        type=int,
+        default=0,
+        help="Override test sample count for --checkpoint-report.",
+    )
     args = parser.parse_args()
     settings = load_json(args.settings)
     if args.epochs:
@@ -2507,6 +2525,8 @@ def main() -> None:
             settings,
             checkpoint_path=checkpoint_path,
             limit=args.limit or None,
+            validation_samples=args.validation_samples or None,
+            test_samples=args.test_samples or None,
         )
         return
     train(settings, limit=args.limit or None)

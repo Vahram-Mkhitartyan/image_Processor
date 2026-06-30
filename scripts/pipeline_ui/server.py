@@ -1115,6 +1115,352 @@ class PipelineUiApplication:
             "truncated": total_count > len(visible),
         }
 
+    def n05_decision_canvas(self, document_id: str) -> dict:
+        """Return N05 provisional text placed in original document coordinates."""
+
+        if not document_id or Path(document_id).name != document_id:
+            raise ValueError("Invalid document id.")
+
+        document_dir = (self.temp_dir / document_id).resolve()
+        if not document_dir.is_relative_to(self.temp_dir.resolve()):
+            raise ValueError("Document path escaped temp_processing.")
+
+        metadata_candidates = sorted(
+            (
+                document_dir
+                / "n05_handwritten_ocr"
+                / "metadata"
+            ).glob("*_handwritten_text_map.json")
+        )
+        if not metadata_candidates:
+            return {
+                "available": False,
+                "reason": "n05_metadata_missing",
+                "document_id": document_id,
+                "boxes": [],
+            }
+
+        metadata_path = metadata_candidates[-1]
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        assembly = payload.get("assembly") if isinstance(payload.get("assembly"), dict) else {}
+        decision = (
+            assembly.get("decision_matrix")
+            if isinstance(assembly.get("decision_matrix"), dict)
+            else {}
+        )
+        rows = decision.get("rows") if isinstance(decision.get("rows"), list) else []
+
+        unit_by_id = {}
+        for unit in payload.get("handwritten_text_units") or []:
+            if not isinstance(unit, dict):
+                continue
+            unit_id = str(unit.get("text_unit_id") or "")
+            if unit_id:
+                unit_by_id[unit_id] = unit
+
+        source_path, source_label = self._document_canvas_source_path(
+            document_id,
+            document_dir,
+            prefer_black_ink=False,
+        )
+        if source_path is None or not source_path.is_file():
+            return {
+                "available": False,
+                "reason": "source_document_missing",
+                "document_id": document_id,
+                "boxes": [],
+            }
+
+        boxes = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            unit_id = str(row.get("text_unit_id") or "")
+            unit = unit_by_id.get(unit_id, {})
+            bbox = (
+                unit.get("document_bbox")
+                or unit.get("final_bbox")
+                or unit.get("crop_bbox")
+            )
+            if not isinstance(bbox, dict):
+                continue
+            try:
+                normalized_bbox = {
+                    "x1": int(bbox["x1"]),
+                    "y1": int(bbox["y1"]),
+                    "x2": int(bbox["x2"]),
+                    "y2": int(bbox["y2"]),
+                }
+            except (KeyError, TypeError, ValueError):
+                continue
+            boxes.append(
+                {
+                    "text_unit_id": unit_id,
+                    "group_id": unit.get("group_id"),
+                    "layer": unit.get("layer"),
+                    "bbox": normalized_bbox,
+                    "selected_text": row.get("selected_text") or row.get("input_text") or "",
+                    "input_text": row.get("input_text") or "",
+                    "backup_string": row.get("backup_string") or "",
+                    "status": row.get("status") or "unknown",
+                    "score": row.get("selected_score"),
+                    "word_candidate_count": len(row.get("word_candidates") or []),
+                    "source_coverage": row.get("source_coverage") or {},
+                }
+            )
+
+        return {
+            "available": True,
+            "document_id": document_id,
+            "source_document_url": self._artifact_url_for_path(source_path),
+            "source_document_path": source_path.relative_to(self.base_dir).as_posix(),
+            "source_document_kind": source_label,
+            "metadata_path": metadata_path.relative_to(self.base_dir).as_posix(),
+            "decision_status": decision.get("status"),
+            "decision_version": decision.get("version"),
+            "boxes": boxes,
+            "summary": {
+                "box_count": len(boxes),
+                "ready_count": sum(
+                    box.get("status") == "provisional_ready"
+                    for box in boxes
+                ),
+            },
+        }
+
+    @staticmethod
+    def _printed_canvas_candidates(printed_ocr: dict) -> list[dict]:
+        """Normalize raw N04 OCR candidates for display on the context canvas."""
+        if not isinstance(printed_ocr, dict):
+            return []
+        candidates = printed_ocr.get("candidates")
+        if not isinstance(candidates, list):
+            return []
+
+        normalized = []
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            text = str(candidate.get("text") or "").strip()
+            if not text:
+                continue
+            normalized.append(
+                {
+                    "text": text,
+                    "engine": candidate.get("engine"),
+                    "language": candidate.get("language"),
+                    "role": candidate.get("role"),
+                    "status": candidate.get("status"),
+                    "trusted_as_final": bool(candidate.get("trusted_as_final")),
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _expanded_printed_canvas_bbox(
+        bbox: dict,
+        unit: dict,
+        canvas_width: int | None,
+        canvas_height: int | None,
+    ) -> tuple[dict, str | None]:
+        """Widen black printed context boxes for visual inspection only."""
+
+        if unit.get("layer") != "black":
+            return dict(bbox), None
+
+        width = max(int(bbox["x2"]) - int(bbox["x1"]), 1)
+        height = max(int(bbox["y2"]) - int(bbox["y1"]), 1)
+        left_pad = max(32, min(96, int(width * 0.35)))
+        right_pad = max(14, min(36, int(width * 0.12)))
+        vertical_pad = max(2, min(6, int(height * 0.12)))
+
+        expanded = {
+            "x1": max(0, int(bbox["x1"]) - left_pad),
+            "y1": max(0, int(bbox["y1"]) - vertical_pad),
+            "x2": int(bbox["x2"]) + right_pad,
+            "y2": int(bbox["y2"]) + vertical_pad,
+        }
+        if canvas_width:
+            expanded["x2"] = min(int(canvas_width), expanded["x2"])
+        if canvas_height:
+            expanded["y2"] = min(int(canvas_height), expanded["y2"])
+        expanded["width"] = max(0, expanded["x2"] - expanded["x1"])
+        expanded["height"] = max(0, expanded["y2"] - expanded["y1"])
+        return expanded, "black_printed_context_display_padding"
+
+    def n04_printed_context_canvas(self, document_id: str) -> dict:
+        """Return printed OCR context tokens placed in original coordinates."""
+
+        if not document_id or Path(document_id).name != document_id:
+            raise ValueError("Invalid document id.")
+
+        document_dir = (self.temp_dir / document_id).resolve()
+        if not document_dir.is_relative_to(self.temp_dir.resolve()):
+            raise ValueError("Document path escaped temp_processing.")
+
+        metadata_candidates = sorted(
+            (
+                document_dir
+                / "n04_printed_ocr"
+                / "metadata"
+            ).glob("*_printed_text_map.json")
+        )
+        if not metadata_candidates:
+            return {
+                "available": False,
+                "reason": "n04_metadata_missing",
+                "document_id": document_id,
+                "boxes": [],
+            }
+
+        metadata_path = metadata_candidates[-1]
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        context_layer = (
+            payload.get("printed_context_layer")
+            if isinstance(payload.get("printed_context_layer"), dict)
+            else {}
+        )
+        context_tokens = (
+            context_layer.get("word_tokens")
+            if isinstance(context_layer.get("word_tokens"), list)
+            else None
+        )
+        units = context_tokens or payload.get("printed_text_units") or []
+
+        source_path, source_label = self._document_canvas_source_path(
+            document_id,
+            document_dir,
+            prefer_black_ink=True,
+        )
+        if source_path is None or not source_path.is_file():
+            return {
+                "available": False,
+                "reason": "source_document_missing",
+                "document_id": document_id,
+                "boxes": [],
+            }
+
+        canvas_width = None
+        canvas_height = None
+        try:
+            import cv2
+
+            canvas_image = cv2.imread(str(source_path), cv2.IMREAD_UNCHANGED)
+            if canvas_image is not None:
+                canvas_height, canvas_width = canvas_image.shape[:2]
+        except Exception:
+            canvas_width = None
+            canvas_height = None
+
+        boxes = []
+        for index, unit in enumerate(units):
+            if not isinstance(unit, dict):
+                continue
+            bbox = (
+                unit.get("document_bbox")
+                or unit.get("final_bbox")
+                or unit.get("crop_bbox")
+            )
+            if not isinstance(bbox, dict):
+                continue
+            try:
+                normalized_bbox = {
+                    "x1": int(bbox["x1"]),
+                    "y1": int(bbox["y1"]),
+                    "x2": int(bbox["x2"]),
+                    "y2": int(bbox["y2"]),
+                }
+            except (KeyError, TypeError, ValueError):
+                continue
+
+            printed_ocr = (
+                unit.get("printed_ocr")
+                if isinstance(unit.get("printed_ocr"), dict)
+                else {}
+            )
+            candidates = (
+                unit.get("candidates")
+                if isinstance(unit.get("candidates"), list)
+                else self._printed_canvas_candidates(printed_ocr)
+            )
+            text = str(
+                unit.get("text")
+                or (candidates[0].get("text") if candidates else "")
+                or ""
+            ).strip()
+            token_id = str(
+                unit.get("token_id")
+                or unit.get("text_unit_id")
+                or f"printed_{index:04d}"
+            )
+            display_bbox, expansion_reason = self._expanded_printed_canvas_bbox(
+                normalized_bbox,
+                unit,
+                canvas_width,
+                canvas_height,
+            )
+            boxes.append(
+                {
+                    "token_id": token_id,
+                    "text_unit_id": unit.get("text_unit_id"),
+                    "source_group_id": unit.get("source_group_id"),
+                    "layer": unit.get("layer"),
+                    "visual_class": unit.get("visual_class"),
+                    "bbox": display_bbox,
+                    "original_bbox": normalized_bbox,
+                    "bbox_expansion_reason": expansion_reason,
+                    "text": text,
+                    "candidate_count": len(candidates),
+                    "candidates": candidates[:5],
+                    "status": (
+                        unit.get("status")
+                        or printed_ocr.get("status")
+                        or "raw_context"
+                    ),
+                    "trusted_as_final": bool(unit.get("trusted_as_final")),
+                    "tesseract_input_source": unit.get("tesseract_input_source"),
+                    "analysis_mask_used_for_tesseract": bool(
+                        unit.get("analysis_mask_used_for_tesseract")
+                    ),
+                    "n04_crop_bbox_source": unit.get("n04_crop_bbox_source"),
+                    "black_mask_derived_bbox": unit.get("black_mask_derived_bbox"),
+                    "black_mask_derived_bbox_reason": unit.get(
+                        "black_mask_derived_bbox_reason"
+                    ),
+                    "black_mask_reflected_ocr_source_kind": unit.get(
+                        "black_mask_reflected_ocr_source_kind"
+                    ),
+                    "mask_source": unit.get("mask_source"),
+                    "n04_copied_crop_path": unit.get("n04_copied_crop_path"),
+                    "tesseract_ready_crop_path": unit.get("tesseract_ready_crop_path"),
+                }
+            )
+
+        black_mask_count = sum(
+            bool(box.get("analysis_mask_used_for_tesseract"))
+            or box.get("mask_source") == "black_ink_mask"
+            or box.get("tesseract_input_source") == "black_mask_reflected_ocr_crop_path"
+            for box in boxes
+        )
+        boxes_with_text = sum(bool(box.get("text")) for box in boxes)
+
+        return {
+            "available": True,
+            "document_id": document_id,
+            "source_document_url": self._artifact_url_for_path(source_path),
+            "source_document_path": source_path.relative_to(self.base_dir).as_posix(),
+            "source_document_kind": source_label,
+            "metadata_path": metadata_path.relative_to(self.base_dir).as_posix(),
+            "context_version": context_layer.get("version") or "legacy_printed_units",
+            "boxes": boxes,
+            "summary": {
+                "box_count": len(boxes),
+                "boxes_with_text": boxes_with_text,
+                "empty_box_count": len(boxes) - boxes_with_text,
+                "black_mask_box_count": black_mask_count,
+            },
+        }
+
     def artifact_context(self, document_id: str, relative_path: str) -> dict:
         """Return original-document bbox context for an N02 crop artifact."""
         if not document_id or Path(document_id).name != document_id:
@@ -1278,6 +1624,58 @@ class PipelineUiApplication:
             return None
         relative = candidate.relative_to(self.base_dir).as_posix()
         return "/artifact?path=" + quote(relative, safe="")
+
+    def _document_canvas_source_path(
+        self,
+        document_id: str,
+        document_dir: Path,
+        *,
+        prefer_black_ink: bool = False,
+    ) -> tuple[Path | None, str]:
+        """Return a post-prep canvas background aligned to document bboxes."""
+
+        n00_dir = document_dir / "n00_file_preparation"
+        candidates: list[tuple[str, Path]] = []
+        if prefer_black_ink:
+            candidates.extend(
+                (
+                    (
+                        "post_deskew_denoised_cropped",
+                        n00_dir
+                        / "full_images"
+                        / "07_denoised_deskewed_cropped.jpeg",
+                    ),
+                    (
+                        "post_deskew_black_ink_layer",
+                        n00_dir / "full_images" / "13_black_ink_layer.jpeg",
+                    ),
+                    (
+                        "post_deskew_black_ink_mask",
+                        n00_dir / "masks" / "13_black_ink_mask.png",
+                    ),
+                )
+            )
+        candidates.extend(
+            (
+                (
+                    "post_deskew_cropped_document",
+                    n00_dir / "full_images" / "06_cropped.jpeg",
+                ),
+                (
+                    "temp_input_document",
+                    document_dir / "input_document.png",
+                ),
+            )
+        )
+
+        source = self._document_sources().get(document_id)
+        if source and source.is_file():
+            candidates.append(("source_document", source))
+
+        for label, path in candidates:
+            if path.is_file():
+                return path, label
+        return None, "source_document_missing"
 
     @staticmethod
     def _first_present(record: dict, keys: tuple[str, ...]) -> str | None:
@@ -2341,6 +2739,18 @@ def _handler_factory(application: PipelineUiApplication):
                         application.artifact_context(
                             document_id=query.get("document", [""])[0],
                             relative_path=query.get("path", [""])[0],
+                        )
+                    )
+                elif parsed.path == "/api/n05-decision-canvas":
+                    self._send_json(
+                        application.n05_decision_canvas(
+                            document_id=query.get("document", [""])[0],
+                        )
+                    )
+                elif parsed.path == "/api/n04-printed-context-canvas":
+                    self._send_json(
+                        application.n04_printed_context_canvas(
+                            document_id=query.get("document", [""])[0],
                         )
                     )
                 elif parsed.path == "/api/aristotel-preview":

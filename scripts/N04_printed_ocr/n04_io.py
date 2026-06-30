@@ -102,10 +102,14 @@ def create_output_folders(output_dir):
 
     for folder in (
         folders["root"],
+        folders["crops"],
+        folders["printed_only"],
+        folders["mixed"],
         folders["tesseract_ready"],
         folders["tesseract_ready_printed_only"],
         folders["tesseract_ready_mixed"],
         folders["metadata"],
+        folders["debug"],
     ):
         ensure_dir(folder)
 

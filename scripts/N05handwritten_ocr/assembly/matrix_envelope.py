@@ -176,7 +176,11 @@ def build_matrix_envelope(
         "segmentation": {
             "version": "segmentation_matrix_v0_2",
             "status": _matrix_status(bool(segmentation_matrix), bool(segmentation_matrix)),
-            "inputs": ["character_unit_proposer", "word_level_ocr_split_hints"],
+            "inputs": [
+                "scribetrain_word_segmenter",
+                "word_level_ocr_split_hints_fallback",
+                "character_unit_proposer_legacy_disabled",
+            ],
             "outputs": ["segmentation_paths", "selected_path_segments"],
             "rows": segmentation_matrix,
         },

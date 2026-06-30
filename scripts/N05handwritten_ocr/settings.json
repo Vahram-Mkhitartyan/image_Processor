@@ -1,7 +1,14 @@
 {
   "reset_output": true,
   "copy_selected_crops": false,
+  "input_filter": {
+    "allowed_layers": [
+      "blue"
+    ]
+  },
   "character_unit_proposer": {
+    "enabled": false,
+    "legacy_only": true,
     "crop_padding_px": 2,
     "split_overlap_px": 1,
     "save_debug": true,
@@ -26,10 +33,29 @@
       "minimum_junction_distance_px": 2
     }
   },
+  "scribetrain_word_segmenter": {
+    "enabled": true,
+    "model_path": "models/scribetrain_monster_v0_1/scribetrain_monster_v0_1.pt",
+    "settings_path": "scripts/Cyber_Lin_Kuei_Assembly/scribetrain/scribetrain_monster_v0_1_settings.json",
+    "device": "auto",
+    "boundary_bin_count": 64,
+    "top_k_paths": 5,
+    "peak_threshold": 0.35,
+    "peak_min_distance_bins": 2,
+    "recall_threshold": 0.12,
+    "recall_candidate_limit": 32,
+    "snap_radius_bins": 2,
+    "min_segment_width_px": 3
+  },
   "assembly": {
     "segmentation": {
+      "primary_segmenter": "scribetrain",
+      "legacy_character_unit_proposer_enabled": false,
+      "legacy_character_unit_proposer_fallback": false,
       "max_segmentation_paths": 8,
-      "enable_word_ocr_boundary_paths": true,
+      "enable_word_ocr_boundary_paths": false,
+      "prefer_word_ocr_boundary_paths": false,
+      "word_ocr_prefer_boundary_min_length": 2,
       "word_ocr_boundary_probability_threshold": 0.55,
       "word_ocr_boundary_match_tolerance_px": 5,
       "word_ocr_boundary_min_gap_px": 6,
@@ -45,13 +71,65 @@
       "local_interrogation_suspicion_penalty": 0.18,
       "local_interrogation_split_bonus": 0.08,
       "local_interrogation_max_alternatives_per_path": 2,
-      "local_interrogation_min_split_width_px": 4
+      "local_interrogation_min_split_width_px": 4,
+      "local_interrogation_min_segment_width_px": 8,
+      "local_interrogation_tiny_segment_suspicion": 1.75,
+      "local_interrogation_length_hint_min_confidence": 0.12,
+      "local_interrogation_length_mismatch_penalty": 0.1,
+      "local_interrogation_max_length_mismatch_penalty": 0.35
     },
     "segment_artifacts": {
       "enabled": true
     },
     "letter_matrix": {
-      "top_k_per_position": 5
+      "top_k_per_position": 5,
+      "word_level_token_weight": 0.2,
+      "segment_scribetrace_weight": 1.15,
+      "segment_cnn_weight": 0.0,
+      "scrististics_effect_weight": 0.18,
+      "allow_scrististics_new_candidates": false,
+      "unit_scribetrace_fallback_weight": 0.45,
+      "unit_cnn_fallback_weight": 0.0
+    },
+    "combined_output": {
+      "top_k_per_position": 8
+    },
+    "decision_matrix": {
+      "top_k_per_position": 5,
+      "beam_width": 32,
+      "max_word_candidates": 12,
+      "score_weight": 0.72,
+      "confidence_weight": 0.28,
+      "source_agreement_bonus": 0.06,
+      "max_source_agreement_bonus": 0.18,
+      "single_source_penalty": 0.22,
+      "conflict_penalty": 0.08,
+      "empty_position_penalty": 0.65,
+      "min_ready_score": 0.42,
+      "min_populated_ratio": 0.7
+    },
+    "scribejudge": {
+      "enabled": false,
+      "high_confidence_threshold": 0.55,
+      "confidence_floor": 0.12,
+      "confusion_risk_alert_threshold": 0.35,
+      "selected_confusion_drop": 0.18,
+      "alternative_confusion_boost": 0.16,
+      "confusion_sources": [
+        {
+          "source": "scribetrace_random_forest_v4_0",
+          "kind": "confusion_pairs",
+          "path": "reports/scribetrace_random_forest_v4_0/confusion_pairs.json",
+          "weight": 1.0
+        },
+        {
+          "source": "glyph_classifier_v0_2_aristotel",
+          "kind": "confusion_matrix",
+          "path": "reports/glyph_classifier_v0_2_aristotel/confusion_matrix.csv",
+          "label_map_path": "models/glyph_classifier_v0_2_aristotel/numeric_label_map.json",
+          "weight": 0.7
+        }
+      ]
     }
   },
   "experts": {
@@ -59,14 +137,20 @@
       "enabled": false
     },
     "scribetrace": {
-      "enabled": false,
-      "enable_theoretical_reconstruction": false
+      "enabled": true,
+      "enable_theoretical_reconstruction": true,
+      "save_debug": false,
+      "save_json": false
+    },
+    "scrilog_scrististics": {
+      "enabled": true
     },
     "character_detector": {
       "enabled": true,
       "model_name": "glyph_classifier_v0_2_aristotel",
       "model_path": "models/glyph_classifier_v0_2_aristotel/glyph_classifier_v0_2_aristotel_best.pt",
       "label_map_path": "scripts/N05handwritten_ocr/character_detector/numeric_label_map.json",
+      "input_polarity_mode": "white_ink_on_black__ink_1_background_0",
       "top_k": 5,
       "device": "auto"
     },
